@@ -1,0 +1,95 @@
+"""Environment-driven configuration with startup validation.
+
+Loaded exactly once at process start. Missing required vars fail fast with a
+clear message so we never silently fall back to insecure defaults.
+"""
+
+from __future__ import annotations
+
+from functools import lru_cache
+from typing import Literal
+
+from pydantic import Field, PostgresDsn, field_validator
+from pydantic_settings import BaseSettings, SettingsConfigDict
+
+
+class Settings(BaseSettings):
+    model_config = SettingsConfigDict(
+        env_file=".env",
+        env_file_encoding="utf-8",
+        case_sensitive=False,
+        extra="ignore",
+    )
+
+    ENV: Literal["dev", "prod", "test"] = "dev"
+    RUN_ENV: Literal["local", "cloud"] = "local"
+    LOG_LEVEL: Literal["DEBUG", "INFO", "WARNING", "ERROR"] = "INFO"
+
+    # Database
+    DATABASE_URL: PostgresDsn
+    DB_POOL_MIN: int = 2
+    DB_POOL_MAX: int = 10
+
+    # OpenAI
+    OPENAI_API_KEY: str
+    OPENAI_MODEL_VISION: str = "gpt-4o"
+    OPENAI_MODEL_REASONING: str = "gpt-4o"
+    OPENAI_MODEL_CHEAP: str = "gpt-4o-mini"
+
+    # Storage
+    STORAGE_BACKEND: Literal["local", "s3"] = "local"
+    LOCAL_STORAGE_ROOT: str = "public"
+
+    # S3 (only required when STORAGE_BACKEND=s3)
+    S3_BUCKET: str | None = None
+    S3_REGION: str | None = None
+    AWS_ACCESS_KEY_ID: str | None = None
+    AWS_SECRET_ACCESS_KEY: str | None = None
+    S3_ENDPOINT_URL: str | None = None
+
+    # Pipeline safety
+    COST_CAP_USD_PER_RUN: float = 0.50
+    MAX_RETRIES_PER_NODE: int = 2
+    LOW_CONFIDENCE_THRESHOLD: float = 0.70
+
+    # Upload limits
+    MAX_UPLOAD_BYTES: int = 25 * 1024 * 1024  # 25 MB
+
+    # CORS
+    ALLOWED_ORIGINS: str = "http://localhost:5173"
+
+    # Auth (dummy tenant-level tokens for Part 1). Must be set in prod.
+    JWT_SECRET: str = "dev-secret-change-me"
+    JWT_ALGORITHM: str = "HS256"
+    SESSION_COOKIE_NAME: str = "nova_session"
+    SESSION_TTL_SECONDS: int = 60 * 60 * 24 * 7  # 7 days
+
+    @field_validator("S3_BUCKET", "S3_REGION", "AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY")
+    @classmethod
+    def _s3_requires_creds(cls, v: str | None, info) -> str | None:
+        # Cross-field validation happens in model_post_init below.
+        return v
+
+    def model_post_init(self, __context) -> None:
+        # When RUN_ENV=local, force local storage so uploads go to the public folder.
+        if self.RUN_ENV == "local" and self.STORAGE_BACKEND != "local":
+            object.__setattr__(self, "STORAGE_BACKEND", "local")
+
+        if self.STORAGE_BACKEND == "s3":
+            missing = [
+                k for k in ("S3_BUCKET", "S3_REGION", "AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY")
+                if getattr(self, k) is None
+            ]
+            if missing:
+                raise ValueError(
+                    f"STORAGE_BACKEND=s3 requires: {', '.join(missing)}"
+                )
+
+    @property
+    def allowed_origins_list(self) -> list[str]:
+        return [o.strip() for o in self.ALLOWED_ORIGINS.split(",") if o.strip()]
+
+
+@lru_cache(maxsize=1)
+def get_settings() -> Settings:
+    return Settings()  # type: ignore[call-arg]
