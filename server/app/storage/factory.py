@@ -7,14 +7,14 @@ from pathlib import Path
 
 from app.core.config import get_settings
 from app.storage.base import Storage
-from app.storage.local import LocalStorage
-from app.storage.s3 import S3Storage
 
 
 @lru_cache(maxsize=1)
 def get_storage() -> Storage:
     settings = get_settings()
+
     if settings.STORAGE_BACKEND == "local":
+        from app.storage.local import LocalStorage
         # Resolve relative to repo root (two levels up from backend/).
         root = Path(settings.LOCAL_STORAGE_ROOT)
         if not root.is_absolute():
@@ -22,12 +22,26 @@ def get_storage() -> Storage:
             root = repo_root / root
         return LocalStorage(root=root)
 
-    return S3Storage(
-        bucket=settings.S3_BUCKET,  # type: ignore[arg-type]
-        region=settings.S3_REGION,  # type: ignore[arg-type]
-        access_key=settings.AWS_ACCESS_KEY_ID,  # type: ignore[arg-type]
-        secret_key=settings.AWS_SECRET_ACCESS_KEY,  # type: ignore[arg-type]
-        endpoint_url=settings.S3_ENDPOINT_URL,
+    if settings.STORAGE_BACKEND == "s3":
+        from app.storage.s3 import S3Storage
+        return S3Storage(
+            bucket=settings.S3_BUCKET,  # type: ignore[arg-type]
+            region=settings.S3_REGION,  # type: ignore[arg-type]
+            access_key=settings.AWS_ACCESS_KEY_ID,  # type: ignore[arg-type]
+            secret_key=settings.AWS_SECRET_ACCESS_KEY,  # type: ignore[arg-type]
+            endpoint_url=settings.S3_ENDPOINT_URL,
+        )
+
+    if settings.STORAGE_BACKEND == "azure_blob":
+        from app.storage.azure_blob import AzureBlobStorage
+        return AzureBlobStorage(
+            connection_string=settings.AZURE_STORAGE_CONNECTION_STRING,  # type: ignore[arg-type]
+            container=settings.AZURE_STORAGE_CONTAINER,  # type: ignore[arg-type]
+        )
+
+    raise ValueError(
+        f"Unknown STORAGE_BACKEND '{settings.STORAGE_BACKEND}'. "
+        "Supported values: local, s3, azure_blob"
     )
 
 

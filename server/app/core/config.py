@@ -30,22 +30,37 @@ class Settings(BaseSettings):
     DB_POOL_MIN: int = 2
     DB_POOL_MAX: int = 10
 
-    # OpenAI
-    OPENAI_API_KEY: str
+    # ---- LLM Provider Selection ----
+    LLM_PROVIDER: Literal["openai", "azure", "gemini"] = "openai"
+
+    # OpenAI (required when LLM_PROVIDER=openai)
+    OPENAI_API_KEY: str = ""
     OPENAI_MODEL_VISION: str = "gpt-4o"
     OPENAI_MODEL_REASONING: str = "gpt-4o"
     OPENAI_MODEL_CHEAP: str = "gpt-4o-mini"
 
-    # Storage
-    STORAGE_BACKEND: Literal["local", "s3"] = "local"
+    # Azure OpenAI (required when LLM_PROVIDER=azure)
+    AZURE_OPENAI_API_KEY: str = ""
+    AZURE_OPENAI_ENDPOINT: str = ""
+    AZURE_OPENAI_API_VERSION: str = "2024-06-01"
+
+    # Google Gemini (required when LLM_PROVIDER=gemini)
+    GEMINI_API_KEY: str = ""
+
+    # ---- Storage Backend Selection ----
+    STORAGE_BACKEND: Literal["local", "s3", "azure_blob"] = "local"
     LOCAL_STORAGE_ROOT: str = "public"
 
-    # S3 (only required when STORAGE_BACKEND=s3)
+    # AWS S3 (required when STORAGE_BACKEND=s3)
     S3_BUCKET: str | None = None
     S3_REGION: str | None = None
     AWS_ACCESS_KEY_ID: str | None = None
     AWS_SECRET_ACCESS_KEY: str | None = None
     S3_ENDPOINT_URL: str | None = None
+
+    # Azure Blob Storage (required when STORAGE_BACKEND=azure_blob)
+    AZURE_STORAGE_CONNECTION_STRING: str = ""
+    AZURE_STORAGE_CONTAINER: str = ""
 
     # Pipeline safety
     COST_CAP_USD_PER_RUN: float = 0.50
@@ -84,6 +99,32 @@ class Settings(BaseSettings):
                 raise ValueError(
                     f"STORAGE_BACKEND=s3 requires: {', '.join(missing)}"
                 )
+
+        if self.STORAGE_BACKEND == "azure_blob":
+            missing = [
+                k for k in ("AZURE_STORAGE_CONNECTION_STRING", "AZURE_STORAGE_CONTAINER")
+                if not getattr(self, k)
+            ]
+            if missing:
+                raise ValueError(
+                    f"STORAGE_BACKEND=azure_blob requires: {', '.join(missing)}"
+                )
+
+        # Validate that the selected LLM provider has its credentials set.
+        provider = self.LLM_PROVIDER
+        if provider == "openai" and not self.OPENAI_API_KEY:
+            raise ValueError("LLM_PROVIDER=openai requires OPENAI_API_KEY")
+        elif provider == "azure":
+            missing = [
+                k for k in ("AZURE_OPENAI_API_KEY", "AZURE_OPENAI_ENDPOINT")
+                if not getattr(self, k)
+            ]
+            if missing:
+                raise ValueError(
+                    f"LLM_PROVIDER=azure requires: {', '.join(missing)}"
+                )
+        elif provider == "gemini" and not self.GEMINI_API_KEY:
+            raise ValueError("LLM_PROVIDER=gemini requires GEMINI_API_KEY")
 
     @property
     def allowed_origins_list(self) -> list[str]:

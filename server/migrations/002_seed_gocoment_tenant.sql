@@ -18,7 +18,7 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_documents_one_active_rule_book
 -- 5. Drop the customers table.
 DROP TABLE IF EXISTS customers;
 
--- 6. Seed the goComent tenant for local development.
+-- 6. Seed the goComet tenant for local development.
 INSERT INTO tenants (name, slug)
-VALUES ('goComent', 'gocoment')
+VALUES ('goComet', 'gocomet')
 ON CONFLICT (slug) DO NOTHING;

@@ -23,6 +23,7 @@ CREATE TABLE customers (
 );
 CREATE INDEX idx_customers_tenant ON customers(tenant_id);
 
+
 -- Unified documents table: both trade documents and rule-book PDFs.
 -- type distinguishes them; extracted_rules is only populated for rule_book.
 -- session_id links this document to its pipeline_sessions row.
@@ -46,12 +47,15 @@ CREATE TABLE documents (
     created_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
     updated_at      TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+
+
 CREATE INDEX idx_documents_tenant ON documents(tenant_id);
 CREATE INDEX idx_documents_tenant_customer ON documents(tenant_id, customer_id);
 CREATE INDEX idx_documents_tenant_type ON documents(tenant_id, type);
 CREATE INDEX idx_documents_status ON documents(tenant_id, status);
 CREATE INDEX idx_documents_created ON documents(tenant_id, created_at DESC);
 CREATE INDEX idx_documents_session ON documents(session_id);
+
 -- Only one active rule_book per (tenant, customer).
 CREATE UNIQUE INDEX idx_documents_one_active_rule_book
     ON documents(tenant_id, customer_id)
@@ -59,6 +63,7 @@ CREATE UNIQUE INDEX idx_documents_one_active_rule_book
 
 -- Pipeline session: the rollup across all steps of one agentic run.
 -- One row per (document, attempt). pipeline_status reflects the session as a whole.
+
 CREATE TABLE pipeline_sessions (
     id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     tenant_id       UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
