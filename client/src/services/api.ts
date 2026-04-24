@@ -1,3 +1,4 @@
+import axios, { AxiosError } from "axios";
 import type {
   DocumentDetail,
   DocumentListItem,
@@ -7,134 +8,106 @@ import type {
   UploadResponse,
 } from "./types";
 
-// All API calls use credentials: "include" so the httpOnly cookie is sent automatically.
-
-async function json<T>(res: Response): Promise<T> {
-  if (!res.ok) {
-    let detail: unknown = null;
-    try {
-      detail = await res.json();
-    } catch {
-      detail = await res.text();
-    }
-    const msg =
-      typeof detail === "object" && detail && "message" in detail
-        ? String((detail as { message: unknown }).message)
-        : `HTTP ${res.status}`;
-    throw new ApiError(msg, res.status, detail);
-  }
-  return (await res.json()) as T;
-}
+// ─── error class ─────────────────────────────────────────────────────────────
 
 export class ApiError extends Error {
   constructor(
     message: string,
     public status: number,
+    public code: string,
     public detail: unknown
   ) {
     super(message);
+    this.name = "ApiError";
   }
 }
 
-// ---------- Auth ----------
+// ─── axios instance ───────────────────────────────────────────────────────────
 
-export async function listTenants(): Promise<TenantOption[]> {
-  const res = await fetch("/api/auth/tenants");
-  return json<TenantOption[]>(res);
+const http = axios.create({
+  baseURL: "/api",
+  withCredentials: true,
+});
+
+// Response interceptor: turn every non-2xx into ApiError with the backend's
+// {code, message} shape so callers get a clean, typed error.
+http.interceptors.response.use(
+  (res) => res,
+  (err: AxiosError<{ code?: string; message?: string; detail?: unknown }>) => {
+    const status = err.response?.status ?? 0;
+    const data = err.response?.data;
+    const message =
+      data?.message ??
+      (status === 0 ? "network_error" : `HTTP ${status}`);
+    const code = data?.code ?? "unknown_error";
+    const detail = data?.detail ?? data ?? null;
+    return Promise.reject(new ApiError(message, status, code, detail));
+  }
+);
+
+// ─── helpers ─────────────────────────────────────────────────────────────────
+
+async function uploadWithProgress<T>(
+  url: string,
+  file: File,
+  onProgress: (pct: number, loaded: number, total: number) => void
+): Promise<T> {
+  const form = new FormData();
+  form.append("file", file);
+  const res = await http.post<T>(url, form, {
+    headers: { "Content-Type": "multipart/form-data" },
+    onUploadProgress(ev) {
+      if (ev.total) {
+        onProgress(Math.round((ev.loaded / ev.total) * 100), ev.loaded, ev.total);
+      }
+    },
+  });
+  return res.data;
 }
 
-// ---------- Documents ----------
+// ─── auth ─────────────────────────────────────────────────────────────────────
+
+export async function listTenants(): Promise<TenantOption[]> {
+  const res = await http.get<TenantOption[]>("/auth/tenants");
+  return res.data;
+}
+
+// ─── documents ────────────────────────────────────────────────────────────────
 
 export async function listDocuments(): Promise<DocumentListItem[]> {
-  const res = await fetch("/api/documents", { credentials: "include" });
-  return json<DocumentListItem[]>(res);
+  const res = await http.get<DocumentListItem[]>("/documents");
+  return res.data;
 }
 
 export async function getDocument(id: string): Promise<DocumentDetail> {
-  const res = await fetch(`/api/documents/${id}`, { credentials: "include" });
-  return json<DocumentDetail>(res);
+  const res = await http.get<DocumentDetail>(`/documents/${id}`);
+  return res.data;
 }
 
-// Uses XHR so we get real upload progress events.
 export function uploadDocument(
   file: File,
   onProgress: (pct: number, loaded: number, total: number) => void
 ): Promise<UploadResponse> {
-  return new Promise((resolve, reject) => {
-    const form = new FormData();
-    form.append("file", file);
-    const xhr = new XMLHttpRequest();
-    xhr.open("POST", "/api/documents/upload");
-    xhr.withCredentials = true;
-
-    xhr.upload.onprogress = (ev) => {
-      if (ev.lengthComputable) {
-        onProgress(Math.round((ev.loaded / ev.total) * 100), ev.loaded, ev.total);
-      }
-    };
-    xhr.onload = () => {
-      if (xhr.status >= 200 && xhr.status < 300) {
-        try {
-          resolve(JSON.parse(xhr.responseText));
-        } catch (e) {
-          reject(e);
-        }
-      } else {
-        let parsed: unknown = xhr.responseText;
-        try { parsed = JSON.parse(xhr.responseText); } catch { /* ignore */ }
-        const msg =
-          typeof parsed === "object" && parsed && "message" in parsed
-            ? String((parsed as { message: unknown }).message)
-            : `HTTP ${xhr.status}`;
-        reject(new ApiError(msg, xhr.status, parsed));
-      }
-    };
-    xhr.onerror = () => reject(new ApiError("network_error", 0, null));
-    xhr.send(form);
-  });
+  return uploadWithProgress<UploadResponse>("/documents/upload", file, onProgress);
 }
 
-// ---------- Rule books ----------
+// ─── rule books ───────────────────────────────────────────────────────────────
 
 export async function listRuleBooks(): Promise<RuleBookBundle[]> {
-  const res = await fetch("/api/rule-books", { credentials: "include" });
-  return json<RuleBookBundle[]>(res);
+  const res = await http.get<RuleBookBundle[]>("/rule-books");
+  return res.data;
 }
 
 export function uploadRuleBook(
   file: File,
   onProgress: (pct: number, loaded: number, total: number) => void
 ): Promise<RuleBookUploadResponse> {
-  return new Promise((resolve, reject) => {
-    const form = new FormData();
-    form.append("file", file);
-    const xhr = new XMLHttpRequest();
-    xhr.open("POST", "/api/rule-books/upload");
-    xhr.withCredentials = true;
+  return uploadWithProgress<RuleBookUploadResponse>("/rule-books/upload", file, onProgress);
+}
 
-    xhr.upload.onprogress = (ev) => {
-      if (ev.lengthComputable) {
-        onProgress(Math.round((ev.loaded / ev.total) * 100), ev.loaded, ev.total);
-      }
-    };
-    xhr.onload = () => {
-      if (xhr.status >= 200 && xhr.status < 300) {
-        try {
-          resolve(JSON.parse(xhr.responseText));
-        } catch (e) {
-          reject(e);
-        }
-      } else {
-        let parsed: unknown = xhr.responseText;
-        try { parsed = JSON.parse(xhr.responseText); } catch { /* ignore */ }
-        const msg =
-          typeof parsed === "object" && parsed && "message" in parsed
-            ? String((parsed as { message: unknown }).message)
-            : `HTTP ${xhr.status}`;
-        reject(new ApiError(msg, xhr.status, parsed));
-      }
-    };
-    xhr.onerror = () => reject(new ApiError("network_error", 0, null));
-    xhr.send(form);
-  });
+// ─── customers ────────────────────────────────────────────────────────────────
+
+export async function listCustomers(tenantId: string) {
+  const res = await http.get("/customers", { params: { tenant_id: tenantId } });
+  return res.data;
 }

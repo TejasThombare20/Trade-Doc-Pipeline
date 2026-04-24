@@ -1,26 +1,22 @@
-"""Admin-only rule book upload + listing.
-
-Rule books are stored in the unified documents table with type='rule_book'.
-Since tenant = customer, rule books are scoped per tenant.
-"""
+"""Admin-only rule book upload + listing."""
 
 from __future__ import annotations
 
+import json
+
 from fastapi import APIRouter, Depends, File, UploadFile
 
-from app.api.deps import require_admin, get_tenant_context
+from app.api.deps import get_document_repo, get_rule_book_svc, require_admin, get_tenant_context
 from app.core.config import get_settings
 from app.core.errors import ValidationError
-from app.db.pool import get_pool
-from app.repositories import documents as doc_repo
+from app.repositories.documents import DocumentRepository
 from app.schemas.api import RuleBookBundle, RuleBookUploadResponse, StoredDocumentMeta, TenantContext
-from app.services.rule_books import upload_rule_book
+from app.services.rule_books import RuleBookService
 
 router = APIRouter(prefix="/api/rule-books", tags=["rule-books"])
 
 
 def _file_url(storage_key: str) -> str:
-    """Build a URL for the frontend to fetch the file from the backend."""
     return f"/api/files/{storage_key}"
 
 
@@ -28,13 +24,14 @@ def _file_url(storage_key: str) -> str:
 async def upload(
     file: UploadFile = File(...),
     ctx: TenantContext = Depends(require_admin),
+    svc: RuleBookService = Depends(get_rule_book_svc),
 ):
     settings = get_settings()
     data = await file.read()
     if len(data) > settings.MAX_UPLOAD_BYTES:
         raise ValidationError(f"file exceeds max size {settings.MAX_UPLOAD_BYTES} bytes")
 
-    res = await upload_rule_book(
+    res = await svc.upload_rule_book(
         tenant_id=ctx.tenant_id,
         filename=file.filename or "rule_book.pdf",
         content_type=file.content_type or "application/pdf",
@@ -50,16 +47,11 @@ async def upload(
 @router.get("", response_model=list[RuleBookBundle])
 async def list_rule_books(
     ctx: TenantContext = Depends(get_tenant_context),
+    repo: DocumentRepository = Depends(get_document_repo),
 ):
-    """Return rule books for the current tenant, including file path + extracted rules."""
-    pool = get_pool()
-    async with pool.acquire() as conn:
-        rows = await doc_repo.list_rule_books(
-            conn, tenant_id=ctx.tenant_id,
-        )
+    rows = await repo.list_rule_books(tenant_id=ctx.tenant_id)
     result: list[RuleBookBundle] = []
     for r in rows:
-        import json
         rules_raw = r["extracted_rules"]
         if isinstance(rules_raw, str):
             rules_raw = json.loads(rules_raw)
@@ -77,8 +69,5 @@ async def list_rule_books(
             created_at=r["created_at"],
             file_url=_file_url(r["storage_key"]),
         )
-        result.append(RuleBookBundle(
-            document=doc_meta,
-            extracted_rules=rules_raw,
-        ))
+        result.append(RuleBookBundle(document=doc_meta, extracted_rules=rules_raw))
     return result

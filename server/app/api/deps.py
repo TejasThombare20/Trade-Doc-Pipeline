@@ -1,32 +1,28 @@
-"""Request-scoped dependencies: cookie-based JWT session, role gating.
-
-Session auth is tenant-level (no user schema). The sign-in endpoint mints a
-JWT for a chosen tenant + role, stored in an httpOnly cookie. All other
-endpoints read the cookie here.
-"""
+"""Request-scoped dependencies: auth, repos, services."""
 
 from __future__ import annotations
 
+from typing import AsyncGenerator
 from uuid import UUID
 
+import asyncpg
 from fastapi import Cookie, Depends
 
 from app.core.auth import decode_token
-from app.core.config import get_settings
 from app.core.errors import AuthError, ForbiddenError
+from app.db.pool import DbPool, get_db_pool
+from app.repositories.customers import CustomerRepository
+from app.repositories.documents import DocumentRepository
+from app.repositories.tenants import TenantRepository
 from app.schemas.api import TenantContext
 from app.schemas.common import UserRole
+from app.services.documents import DocumentService, get_document_service
+from app.services.events import SessionBus, get_event_bus_service
+from app.services.pipeline import PipelineService, get_pipeline_service
+from app.services.rule_books import RuleBookService, get_rule_book_service
 
 
-async def tenant_context(
-    _cookie: str | None = None,
-) -> TenantContext:  # overridden at runtime via Depends(_read_cookie)
-    raise AuthError("tenant_context must be obtained via Depends(get_tenant_context)")
-
-
-def _cookie_name() -> str:
-    return get_settings().SESSION_COOKIE_NAME
-
+# ─── auth ────────────────────────────────────────────────────────────────────
 
 async def get_tenant_context(
     nova_session: str | None = Cookie(default=None, alias="nova_session"),
@@ -47,3 +43,50 @@ async def require_admin(ctx: TenantContext = Depends(get_tenant_context)) -> Ten
     if ctx.role != UserRole.ADMIN:
         raise ForbiddenError("admin role required")
     return ctx
+
+
+# ─── db connection ────────────────────────────────────────────────────────────
+
+async def get_conn(
+    pool: DbPool = Depends(get_db_pool),
+) -> AsyncGenerator[asyncpg.Connection, None]:
+    async with pool.acquire() as conn:
+        yield conn
+
+
+# ─── repositories (request-scoped) ───────────────────────────────────────────
+
+def get_document_repo(
+    conn: asyncpg.Connection = Depends(get_conn),
+) -> DocumentRepository:
+    return DocumentRepository(conn)
+
+
+def get_customer_repo(
+    conn: asyncpg.Connection = Depends(get_conn),
+) -> CustomerRepository:
+    return CustomerRepository(conn)
+
+
+def get_tenant_repo(
+    conn: asyncpg.Connection = Depends(get_conn),
+) -> TenantRepository:
+    return TenantRepository(conn)
+
+
+# ─── services (app-scoped singletons via Depends) ────────────────────────────
+
+def get_pipeline_svc() -> PipelineService:
+    return get_pipeline_service()
+
+
+def get_document_svc() -> DocumentService:
+    return get_document_service()
+
+
+def get_rule_book_svc() -> RuleBookService:
+    return get_rule_book_service()
+
+
+def get_bus_svc() -> SessionBus:
+    return get_event_bus_service()

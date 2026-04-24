@@ -1,8 +1,10 @@
-"""Router / Decision agent prompt."""
+"""Router / Decision agent prompts."""
 
 from __future__ import annotations
 
-SYSTEM = """You are a decision agent for a trade-document validation pipeline.
+
+class RouterPrompts:
+    SYSTEM = """You are a decision agent for a trade-document validation pipeline.
 Given a validator's per-field results, choose exactly one outcome:
 
   - auto_approve:    all fields match, no uncertain, no mismatches. Safe to store.
@@ -21,8 +23,12 @@ OUTPUT RULES:
 
 Submit your decision by calling the `submit_decision` tool."""
 
-
-USER_TEMPLATE = """VALIDATOR OUTPUT (JSON):
+    USER_TEMPLATE = """VALIDATOR OUTPUT (JSON):
 {validation_json}
 
 Decide the outcome and populate discrepancies."""
+
+
+# Module-level aliases for backward-compat.
+SYSTEM = RouterPrompts.SYSTEM
+USER_TEMPLATE = RouterPrompts.USER_TEMPLATE

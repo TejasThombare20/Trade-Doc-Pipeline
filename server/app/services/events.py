@@ -22,6 +22,8 @@ logger = get_logger(__name__)
 
 
 class SessionBus:
+    """Per-session async event bus used by the pipeline and SSE handler."""
+
     def __init__(self) -> None:
         self._history: dict[str, list[dict]] = defaultdict(list)
         self._subs: dict[str, list[asyncio.Queue]] = defaultdict(list)
@@ -53,13 +55,16 @@ class SessionBus:
         await self.publish(session_id, {"event": "closed"})
 
 
-_bus: SessionBus | None = None
+# Module-level singleton
+_bus: SessionBus = SessionBus()
 
 
 def get_bus() -> SessionBus:
-    global _bus
-    if _bus is None:
-        _bus = SessionBus()
+    return _bus
+
+
+def get_event_bus_service() -> SessionBus:
+    """DI-friendly alias for get_bus()."""
     return _bus
 
 

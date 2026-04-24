@@ -6,23 +6,23 @@ import asyncio
 import json
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, File, Form, UploadFile
+from fastapi import APIRouter, Depends, File, UploadFile
 from fastapi.responses import StreamingResponse
 
-from app.api.deps import get_tenant_context
+from app.api.deps import (
+    get_bus_svc,
+    get_document_repo,
+    get_document_svc,
+    get_tenant_context,
+)
 from app.core.config import get_settings
 from app.core.errors import NotFoundError, ValidationError
-from app.db.pool import get_pool
-from app.repositories import documents as doc_repo
+from app.repositories.documents import DocumentRepository
 from app.schemas.api import DocumentUploadResponse, TenantContext
 from app.schemas.common import DocumentStatus
-from app.schemas.pipeline import (
-    DocumentDetail,
-    DocumentListItem,
-    TimelineStep,
-)
-from app.services.documents import upload_and_start_pipeline
-from app.services.events import encode_sse, get_bus
+from app.schemas.pipeline import DocumentDetail, DocumentListItem
+from app.services.documents import DocumentService
+from app.services.events import SessionBus, encode_sse
 
 router = APIRouter(prefix="/api/documents", tags=["documents"])
 
@@ -31,13 +31,14 @@ router = APIRouter(prefix="/api/documents", tags=["documents"])
 async def upload(
     file: UploadFile = File(...),
     ctx: TenantContext = Depends(get_tenant_context),
+    svc: DocumentService = Depends(get_document_svc),
 ):
     settings = get_settings()
     data = await file.read()
     if len(data) > settings.MAX_UPLOAD_BYTES:
         raise ValidationError(f"file exceeds max size {settings.MAX_UPLOAD_BYTES} bytes")
 
-    res = await upload_and_start_pipeline(
+    res = await svc.upload_and_start_pipeline(
         tenant_id=ctx.tenant_id,
         filename=file.filename or "document.pdf",
         content_type=file.content_type or "application/pdf",
@@ -51,22 +52,21 @@ async def upload(
 
 
 @router.get("", response_model=list[DocumentListItem])
-async def list_documents(ctx: TenantContext = Depends(get_tenant_context)):
-    pool = get_pool()
-    async with pool.acquire() as conn:
-        rows = await doc_repo.list_documents(conn, tenant_id=ctx.tenant_id)
+async def list_documents(
+    ctx: TenantContext = Depends(get_tenant_context),
+    repo: DocumentRepository = Depends(get_document_repo),
+):
+    rows = await repo.list_documents(tenant_id=ctx.tenant_id)
     items: list[DocumentListItem] = []
     for r in rows:
-        # Derive outcome from the latest decision's tool_output
         outcome = None
         if r["type"] == "document":
-            async with pool.acquire() as conn:
-                dec = await doc_repo.get_latest_decision(
-                    conn, tenant_id=ctx.tenant_id, document_id=r["id"],
-                )
-                if dec is not None:
-                    to = _json_loads(dec["tool_output"])
-                    outcome = to.get("outcome")
+            dec = await repo.get_latest_decision(
+                tenant_id=ctx.tenant_id, document_id=r["id"],
+            )
+            if dec is not None:
+                to = _json_loads(dec["tool_output"])
+                outcome = to.get("outcome")
         items.append(DocumentListItem(
             id=r["id"],
             original_name=r["original_name"],
@@ -81,32 +81,29 @@ async def list_documents(ctx: TenantContext = Depends(get_tenant_context)):
 
 
 @router.get("/{document_id}", response_model=DocumentDetail)
-async def get_document(document_id: UUID, ctx: TenantContext = Depends(get_tenant_context)):
-    pool = get_pool()
-    async with pool.acquire() as conn:
-        doc = await doc_repo.get_document(
-            conn, tenant_id=ctx.tenant_id, document_id=document_id,
-        )
-        if doc is None:
-            raise NotFoundError("document not found")
-        extraction_row = await doc_repo.get_latest_extraction(
-            conn, tenant_id=ctx.tenant_id, document_id=document_id,
-        )
-        validation_row = await doc_repo.get_latest_validation(
-            conn, tenant_id=ctx.tenant_id, document_id=document_id,
-        )
-        decision_row = await doc_repo.get_latest_decision(
-            conn, tenant_id=ctx.tenant_id, document_id=document_id,
-        )
-        session = None
-        if doc["session_id"]:
-            session = await doc_repo.get_pipeline_session(
-                conn, tenant_id=ctx.tenant_id, session_id=doc["session_id"],
-            )
+async def get_document(
+    document_id: UUID,
+    ctx: TenantContext = Depends(get_tenant_context),
+    repo: DocumentRepository = Depends(get_document_repo),
+):
+    doc = await repo.get_document(tenant_id=ctx.tenant_id, document_id=document_id)
+    if doc is None:
+        raise NotFoundError("document not found")
 
-    extraction = _json_loads(extraction_row["tool_output"]) if extraction_row else None
-    validation = _json_loads(validation_row["tool_output"]) if validation_row else None
-    decision = _json_loads(decision_row["tool_output"]) if decision_row else None
+    extraction_row = await repo.get_latest_extraction(
+        tenant_id=ctx.tenant_id, document_id=document_id,
+    )
+    validation_row = await repo.get_latest_validation(
+        tenant_id=ctx.tenant_id, document_id=document_id,
+    )
+    decision_row = await repo.get_latest_decision(
+        tenant_id=ctx.tenant_id, document_id=document_id,
+    )
+    session = None
+    if doc["session_id"]:
+        session = await repo.get_pipeline_session(
+            tenant_id=ctx.tenant_id, session_id=doc["session_id"],
+        )
 
     return DocumentDetail(
         id=doc["id"],
@@ -121,9 +118,9 @@ async def get_document(document_id: UUID, ctx: TenantContext = Depends(get_tenan
         is_active=doc["is_active"],
         created_at=doc["created_at"],
         file_url=f"/api/files/{doc['storage_key']}" if doc.get("storage_key") else None,
-        extraction=extraction,
-        validation=validation,
-        decision=decision,
+        extraction=_json_loads(extraction_row["tool_output"]) if extraction_row else None,
+        validation=_json_loads(validation_row["tool_output"]) if validation_row else None,
+        decision=_json_loads(decision_row["tool_output"]) if decision_row else None,
         pipeline_status=session["pipeline_status"] if session else None,
         total_tokens_in=session["total_tokens_in"] if session else 0,
         total_tokens_out=session["total_tokens_out"] if session else 0,
@@ -131,23 +128,18 @@ async def get_document(document_id: UUID, ctx: TenantContext = Depends(get_tenan
 
 
 @router.get("/{document_id}/timeline")
-async def timeline_sse(document_id: UUID, ctx: TenantContext = Depends(get_tenant_context)):
-    """SSE endpoint. Streams pipeline step events in real-time.
-
-    The client connects with EventSource; events arrive as they happen.
-    On session completion a 'closed' event is sent and the stream ends.
-    """
-    pool = get_pool()
-    async with pool.acquire() as conn:
-        doc = await doc_repo.get_document(
-            conn, tenant_id=ctx.tenant_id, document_id=document_id,
-        )
-        if doc is None:
-            raise NotFoundError("document not found")
+async def timeline_sse(
+    document_id: UUID,
+    ctx: TenantContext = Depends(get_tenant_context),
+    repo: DocumentRepository = Depends(get_document_repo),
+    bus: SessionBus = Depends(get_bus_svc),
+):
+    doc = await repo.get_document(tenant_id=ctx.tenant_id, document_id=document_id)
+    if doc is None:
+        raise NotFoundError("document not found")
 
     session_id = doc["session_id"]
 
-    # If no session yet, return current state as a single snapshot
     if session_id is None:
         async def no_session():
             snapshot = {
@@ -160,14 +152,12 @@ async def timeline_sse(document_id: UUID, ctx: TenantContext = Depends(get_tenan
             yield encode_sse(snapshot)
         return StreamingResponse(no_session(), media_type="text/event-stream")
 
-    # Fetch existing pipeline_runs as initial timeline steps
-    async with pool.acquire() as conn:
-        runs = await doc_repo.list_runs_for_session(
-            conn, tenant_id=ctx.tenant_id, session_id=session_id,
-        )
-        session = await doc_repo.get_pipeline_session(
-            conn, tenant_id=ctx.tenant_id, session_id=session_id,
-        )
+    runs = await repo.list_runs_for_session(
+        tenant_id=ctx.tenant_id, session_id=session_id,
+    )
+    session = await repo.get_pipeline_session(
+        tenant_id=ctx.tenant_id, session_id=session_id,
+    )
 
     steps = [
         {
@@ -184,7 +174,6 @@ async def timeline_sse(document_id: UUID, ctx: TenantContext = Depends(get_tenan
         for r in runs
     ]
 
-    # If session is already complete, return snapshot without SSE streaming
     if session and session["pipeline_status"] in ("success", "fail"):
         async def completed_stream():
             snapshot = {
@@ -200,13 +189,9 @@ async def timeline_sse(document_id: UUID, ctx: TenantContext = Depends(get_tenan
             yield encode_sse({"event": "closed"})
         return StreamingResponse(completed_stream(), media_type="text/event-stream")
 
-    # Live stream: send snapshot + subscribe to bus for live events
-    bus = get_bus()
-
     async def live_stream():
         queue, history = await bus.subscribe(UUID(str(session_id)))
         try:
-            # Send initial snapshot
             snapshot = {
                 "event": "snapshot",
                 "document_id": str(document_id),
@@ -216,13 +201,11 @@ async def timeline_sse(document_id: UUID, ctx: TenantContext = Depends(get_tenan
             }
             yield encode_sse(snapshot)
 
-            # Replay any events that happened between our DB query and subscription
             for ev in history:
                 yield encode_sse(ev)
                 if ev.get("event") == "closed":
                     return
 
-            # Stream live events
             while True:
                 try:
                     ev = await asyncio.wait_for(queue.get(), timeout=30)
@@ -230,7 +213,6 @@ async def timeline_sse(document_id: UUID, ctx: TenantContext = Depends(get_tenan
                     if ev.get("event") == "closed":
                         return
                 except asyncio.TimeoutError:
-                    # Send keepalive comment
                     yield b": keepalive\n\n"
         finally:
             await bus.unsubscribe(UUID(str(session_id)), queue)

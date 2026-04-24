@@ -1,8 +1,10 @@
-"""Validator agent prompt."""
+"""Validator agent prompts."""
 
 from __future__ import annotations
 
-SYSTEM = """You are a trade-document validator. You are given:
+
+class ValidatorPrompts:
+    SYSTEM = """You are a trade-document validator. You are given:
   1. A set of customer-specific rules (field_name, rule_type, spec, severity, description)
   2. An extracted document (field_name -> value, confidence, source_snippet)
 
@@ -34,8 +36,7 @@ CORE PRINCIPLES:
 
 Submit your verdict by calling the `submit_validation` tool."""
 
-
-USER_TEMPLATE = """CUSTOMER RULES (JSON):
+    USER_TEMPLATE = """CUSTOMER RULES (JSON):
 {rules_json}
 
 EXTRACTED DOCUMENT (JSON):
@@ -44,3 +45,8 @@ EXTRACTED DOCUMENT (JSON):
 LOW_CONFIDENCE_THRESHOLD = {low_confidence_threshold}
 
 Validate every rule. Return results keyed by field_name."""
+
+
+# Module-level aliases for backward-compat.
+SYSTEM = ValidatorPrompts.SYSTEM
+USER_TEMPLATE = ValidatorPrompts.USER_TEMPLATE

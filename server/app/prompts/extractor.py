@@ -1,12 +1,10 @@
-"""Extractor agent prompt.
-
-Anti-hallucination is baked in: absence is a valid answer, never invent,
-every value must be grounded in a verbatim snippet from the doc.
-"""
+"""Extractor agent prompts."""
 
 from __future__ import annotations
 
-SYSTEM = """You are a trade-document extractor. You read a single trade document \
+
+class ExtractorPrompts:
+    SYSTEM = """You are a trade-document extractor. You read a single trade document \
 (Bill of Lading, Commercial Invoice, Packing List, or Certificate of Origin) \
 and submit the canonical fields by calling the `extract_trade_document` tool.
 
@@ -103,8 +101,7 @@ CANONICAL FIELDS to extract (return all keys; use nulls where absent):
 Call the `extract_trade_document` tool with all keys populated. Do not add or \
 remove keys from the tool's schema."""
 
-
-USER_PREAMBLE = """Extract the canonical fields from this trade document by \
+    USER_PREAMBLE = """Extract the canonical fields from this trade document by \
 calling the `extract_trade_document` tool.
 
 Quick reminders:
@@ -121,8 +118,7 @@ Quick reminders:
 The document is attached below (text extracted natively when possible, and/or \
 page images)."""
 
-
-RULES_HINT_TEMPLATE = """Reference — customer validation rules (a separate validator checks them later):
+    RULES_HINT_TEMPLATE = """Reference — customer validation rules (a separate validator checks them later):
 {rules_lines}
 
 How to use these rules while extracting:
@@ -140,5 +136,11 @@ How to use these rules while extracting:
 
 """
 
+    NO_RULES_HINT = ""
 
-NO_RULES_HINT = ""
+
+# Module-level aliases for backward-compat with agents that import these names directly.
+SYSTEM = ExtractorPrompts.SYSTEM
+USER_PREAMBLE = ExtractorPrompts.USER_PREAMBLE
+RULES_HINT_TEMPLATE = ExtractorPrompts.RULES_HINT_TEMPLATE
+NO_RULES_HINT = ExtractorPrompts.NO_RULES_HINT

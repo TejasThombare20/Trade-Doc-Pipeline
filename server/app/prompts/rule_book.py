@@ -1,8 +1,10 @@
-"""Rule book extraction prompt."""
+"""Rule book extraction prompts."""
 
 from __future__ import annotations
 
-SYSTEM = """You are given a customer's compliance rule book for international
+
+class RuleBookPrompts:
+    SYSTEM = """You are given a customer's compliance rule book for international
 trade documents. Extract a structured list of validation rules.
 
 Each rule targets ONE canonical field:
@@ -63,5 +65,9 @@ Examples:
 
 Submit the rules by calling the `submit_rule_book` tool."""
 
+    USER_PREAMBLE = """Extract the structured rules from this customer rule book."""
 
-USER_PREAMBLE = """Extract the structured rules from this customer rule book."""
+
+# Module-level aliases for backward-compat.
+SYSTEM = RuleBookPrompts.SYSTEM
+USER_PREAMBLE = RuleBookPrompts.USER_PREAMBLE

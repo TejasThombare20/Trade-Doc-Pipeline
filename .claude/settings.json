@@ -1,7 +1,11 @@
 {
   "permissions": {
     "allow": [
-      "Bash(./venv/bin/python -c ' *)"
+      "Bash(./venv/bin/python -c ' *)",
+      "Bash(npm install *)",
+      "Bash(npx tsc *)",
+      "Bash(python -c ' *)",
+      "Bash(python3 -c ' *)"
     ]
   }
 }
