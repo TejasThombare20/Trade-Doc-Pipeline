@@ -1,4 +1,4 @@
-<img width="2546" height="1393" alt="image" src="https://github.com/user-attachments/assets/eb128c05-1555-45db-bdde-80f50cfc058e" /># Nova — Trade Document Pipeline
+# Nova — Trade Document Pipeline
 
 A multi-agent system that ingests trade documents (Bill of Lading, Commercial Invoice, Packing List, Certificate of Origin), extracts structured fields via a vision LLM, validates them against customer-specific rule books, and routes each document to one of three outcomes: **auto-approve**, **human review**, or **draft amendment**.
 
