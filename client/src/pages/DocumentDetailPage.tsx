@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { useParams, Link } from "react-router-dom";
-import { ArrowLeft, FileText } from "lucide-react";
+import { ArrowLeft, FileText, ExternalLink } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { DocumentStatusBadge } from "@/components/StatusBadges";
@@ -70,7 +70,21 @@ export function DocumentDetailPage() {
             </div>
           </div>
         </div>
-        <DocumentStatusBadge status={doc.status} />
+        <div className="flex items-center gap-2">
+          {doc.file_url && (
+            <Button
+              variant="outline"
+              size="sm"
+              asChild
+            >
+              <a href={doc.file_url} target="_blank" rel="noopener noreferrer">
+                <ExternalLink className="h-4 w-4 mr-1.5" />
+                View document
+              </a>
+            </Button>
+          )}
+          <DocumentStatusBadge status={doc.status} />
+        </div>
       </div>
 
       <Card>
@@ -167,9 +181,10 @@ function ExtractionView({ data }: { data: Record<string, unknown> }) {
 
 function ValidationView({ data }: { data: Record<string, unknown> }) {
   const results = data.results as Record<string, Record<string, unknown>> | undefined;
-  if (!results) {
+  if (results === undefined || results === null) {
     return <pre className="text-xs overflow-auto text-muted-foreground">{JSON.stringify(data, null, 2)}</pre>;
   }
+  const entries = Object.entries(results);
   return (
     <div className="space-y-3">
       <div className="flex items-center gap-2 text-sm">
@@ -182,47 +197,51 @@ function ValidationView({ data }: { data: Record<string, unknown> }) {
         </span>
       </div>
       {data.summary && <div className="text-sm text-muted-foreground">{data.summary as string}</div>}
-      <div className="overflow-x-auto">
-        <table className="w-full text-sm">
-          <thead className="text-xs text-muted-foreground">
-            <tr className="border-b border-border">
-              <th className="text-left font-medium py-2 pr-3">Field</th>
-              <th className="text-left font-medium py-2 px-3">Status</th>
-              <th className="text-left font-medium py-2 px-3">Found</th>
-              <th className="text-left font-medium py-2 px-3">Expected</th>
-              <th className="text-left font-medium py-2 px-3">Severity</th>
-              <th className="text-left font-medium py-2 px-3">Reasoning</th>
-            </tr>
-          </thead>
-          <tbody>
-            {Object.entries(results).map(([name, v]) => (
-              <tr key={name} className="border-b border-border last:border-0">
-                <td className="py-2 pr-3 font-medium text-foreground">{name.replace(/_/g, " ")}</td>
-                <td className="py-2 px-3">
-                  <span className={`text-xs font-medium px-2 py-0.5 rounded-full ${
-                    v.status === "match" ? "bg-emerald-500/10 text-emerald-500" :
-                    v.status === "mismatch" ? "bg-destructive/10 text-destructive" :
-                    "bg-amber-500/10 text-amber-400"
-                  }`}>
-                    {v.status as string}
-                  </span>
-                </td>
-                <td className="py-2 px-3 text-xs text-foreground">{(v.found as string) || "—"}</td>
-                <td className="py-2 px-3 text-xs text-foreground">{(v.expected as string) || "—"}</td>
-                <td className="py-2 px-3">
-                  <span className={`text-xs font-medium ${
-                    v.severity === "critical" ? "text-destructive" :
-                    v.severity === "major" ? "text-amber-400" : "text-muted-foreground"
-                  }`}>
-                    {v.severity as string}
-                  </span>
-                </td>
-                <td className="py-2 px-3 text-xs text-muted-foreground max-w-xs">{v.reasoning as string}</td>
+      {entries.length === 0 ? (
+        <div className="text-sm text-muted-foreground italic">No field-level results returned by the validator.</div>
+      ) : (
+        <div className="overflow-x-auto">
+          <table className="w-full text-sm">
+            <thead className="text-xs text-muted-foreground">
+              <tr className="border-b border-border">
+                <th className="text-left font-medium py-2 pr-3">Field</th>
+                <th className="text-left font-medium py-2 px-3">Status</th>
+                <th className="text-left font-medium py-2 px-3">Found</th>
+                <th className="text-left font-medium py-2 px-3">Expected</th>
+                <th className="text-left font-medium py-2 px-3">Severity</th>
+                <th className="text-left font-medium py-2 px-3">Reasoning</th>
               </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
+            </thead>
+            <tbody>
+              {entries.map(([name, v]) => (
+                <tr key={name} className="border-b border-border last:border-0">
+                  <td className="py-2 pr-3 font-medium text-foreground">{name.replace(/_/g, " ")}</td>
+                  <td className="py-2 px-3">
+                    <span className={`text-xs font-medium px-2 py-0.5 rounded-full ${
+                      v.status === "match" ? "bg-emerald-500/10 text-emerald-500" :
+                      v.status === "mismatch" ? "bg-destructive/10 text-destructive" :
+                      "bg-amber-500/10 text-amber-400"
+                    }`}>
+                      {v.status as string}
+                    </span>
+                  </td>
+                  <td className="py-2 px-3 text-xs text-foreground">{(v.found as string) || "—"}</td>
+                  <td className="py-2 px-3 text-xs text-foreground">{(v.expected as string) || "—"}</td>
+                  <td className="py-2 px-3">
+                    <span className={`text-xs font-medium ${
+                      v.severity === "critical" ? "text-destructive" :
+                      v.severity === "major" ? "text-amber-400" : "text-muted-foreground"
+                    }`}>
+                      {v.severity as string}
+                    </span>
+                  </td>
+                  <td className="py-2 px-3 text-xs text-muted-foreground max-w-xs">{v.reasoning as string}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
     </div>
   );
 }
@@ -241,31 +260,46 @@ function DecisionView({ data }: { data: Record<string, unknown> }) {
         </span>
       </div>
       {data.reasoning && <div className="text-sm text-muted-foreground">{data.reasoning as string}</div>}
-      {discrepancies && discrepancies.length > 0 && (
-        <div className="space-y-2">
-          <div className="text-sm font-medium text-foreground">Discrepancies</div>
-          {discrepancies.map((d, i) => (
-            <div key={i} className="text-sm text-muted-foreground pl-3 border-l-2 border-border space-y-0.5">
-              <div className="flex items-center gap-2">
-                <span className="font-medium text-foreground">{d.field as string}</span>
-                <span className={`text-xs font-medium px-2 py-0.5 rounded-full ${
-                  d.severity === "critical" ? "bg-destructive/10 text-destructive" :
-                  d.severity === "major" ? "bg-amber-500/10 text-amber-400" :
-                  "bg-muted text-muted-foreground"
-                }`}>
-                  {d.severity as string}
-                </span>
-              </div>
-              {d.reasoning && <div className="text-xs text-muted-foreground">{d.reasoning as string}</div>}
-              {(d.found || d.expected) && (
-                <div className="text-xs text-muted-foreground">
-                  Found: {(d.found as string) || "—"} · Expected: {(d.expected as string) || "—"}
-                </div>
-              )}
-            </div>
-          ))}
-        </div>
-      )}
+      <div className="overflow-x-auto">
+        <table className="w-full text-sm">
+          <thead className="text-xs text-muted-foreground">
+            <tr className="border-b border-border">
+              <th className="text-left font-medium py-2 pr-3">Field</th>
+              <th className="text-left font-medium py-2 px-3">Severity</th>
+              <th className="text-left font-medium py-2 px-3">Found</th>
+              <th className="text-left font-medium py-2 px-3">Expected</th>
+              <th className="text-left font-medium py-2 px-3">Reasoning</th>
+            </tr>
+          </thead>
+          <tbody>
+            {discrepancies && discrepancies.length > 0 ? (
+              discrepancies.map((d, i) => (
+                <tr key={i} className="border-b border-border last:border-0">
+                  <td className="py-2 pr-3 font-medium text-foreground">{(d.field as string)?.replace(/_/g, " ")}</td>
+                  <td className="py-2 px-3">
+                    <span className={`text-xs font-medium px-2 py-0.5 rounded-full ${
+                      d.severity === "critical" ? "bg-destructive/10 text-destructive" :
+                      d.severity === "major" ? "bg-amber-500/10 text-amber-400" :
+                      "bg-muted text-muted-foreground"
+                    }`}>
+                      {d.severity as string}
+                    </span>
+                  </td>
+                  <td className="py-2 px-3 text-xs text-foreground">{(d.found as string) || "—"}</td>
+                  <td className="py-2 px-3 text-xs text-foreground">{(d.expected as string) || "—"}</td>
+                  <td className="py-2 px-3 text-xs text-muted-foreground max-w-xs">{d.reasoning as string}</td>
+                </tr>
+              ))
+            ) : (
+              <tr>
+                <td colSpan={5} className="py-3 text-sm text-muted-foreground italic">
+                  No discrepancies — all fields passed validation.
+                </td>
+              </tr>
+            )}
+          </tbody>
+        </table>
+      </div>
     </div>
   );
 }

@@ -4,6 +4,23 @@ A multi-agent system that ingests trade documents (Bill of Lading, Commercial In
 
 ---
 
+## Screenshots & Demo
+
+> **📸 Output Screenshots**
+> _Add screenshots of the pipeline output here — drag and drop images below this line._
+>
+> <!-- SCREENSHOT PLACEHOLDER: Upload page with live SSE timeline -->
+> <!-- SCREENSHOT PLACEHOLDER: Document detail page showing extracted fields, validation table, and routing decision -->
+> <!-- SCREENSHOT PLACEHOLDER: Rule Books admin page -->
+> <!-- SCREENSHOT PLACEHOLDER: Documents list with status and outcome badges -->
+
+> **🎬 Screen Recording**
+> _Add a screen recording (GIF or MP4) of a full end-to-end pipeline run below._
+>
+> <!-- SCREENRECORD PLACEHOLDER: Full pipeline run from upload → parsing → extraction → validation → decision → result -->
+
+---
+
 ## Table of Contents
 
 1. [Quick Start](#quick-start)
@@ -236,66 +253,193 @@ trade-document-pipeline/
 
 ## Architecture & Workflow
 
-### Pipeline Overview
+### System Architecture
 
+The diagram below shows the full system: client ↔ server communication (including SSE), the agentic pipeline steps, the separate rule book flow, and external service connections (OpenAI API and S3).
+
+```mermaid
+flowchart TD
+    subgraph CLIENT["🖥️  React Client (localhost:5173)"]
+        UI_UPLOAD["Upload Page\n(drag-drop dropzone)"]
+        UI_DETAIL["Document Detail Page\n(extraction · validation · decision)"]
+        UI_DOCS["Documents List\n(status + outcome badges)"]
+        UI_RB["Rule Books Page\n(admin only)"]
+        SSE_LISTENER["EventSource listener\nGET /api/documents/{id}/timeline"]
+    end
+
+    subgraph SERVER["⚙️  FastAPI Server (localhost:8000)"]
+        API_UPLOAD["POST /api/documents/upload"]
+        API_DOCS["GET /api/documents"]
+        API_DETAIL["GET /api/documents/{id}"]
+        API_TIMELINE["GET /api/documents/{id}/timeline\n(SSE stream)"]
+        API_RB["POST /api/rule-books/upload"]
+        SESSION_BUS["In-Memory SessionBus\n(asyncio queues per session_id)"]
+
+        subgraph DOC_PIPELINE["📄 Document Pipeline (services/pipeline.py)"]
+            direction TB
+            PARSE["STEP 1 · PARSING\n🔧 manual, no LLM\npdfplumber / pdf2image / python-docx\n→ PreprocessedDocument"]
+            EXTRACT["STEP 2 · EXTRACTION\n🤖 gpt-4o vision\ntool: extract_trade_document\n→ ExtractorOutput"]
+            VALIDATE["STEP 3 · VALIDATION\n🤖 gpt-4o\ntool: submit_validation\n+ Python confidence floor\n→ ValidatorOutput"]
+            DECIDE["STEP 4 · DECISION\n🤖 gpt-4o\ntool: submit_decision\n+ Python outcome invariants\n→ RouterOutput"]
+            PARSE --> EXTRACT --> VALIDATE --> DECIDE
+        end
+
+        subgraph RB_PIPELINE["📖 Rule Book Pipeline (services/pipeline.py)"]
+            direction TB
+            RB_PARSE["STEP 1 · PARSING\n🔧 manual\npdfplumber / pdf2image\n→ PreprocessedDocument"]
+            RB_EXTRACT["STEP 2 · EXTRACTION\n🤖 gpt-4o vision\ntool: submit_rule_book\n→ RuleBookExtractionOutput"]
+            RB_PARSE --> RB_EXTRACT
+        end
+
+        DB[("🗄️ PostgreSQL\ntenants · documents\npipeline_sessions\npipeline_runs\nextractions · validations\ndecisions")]
+    end
+
+    subgraph OPENAI["🧠 OpenAI API"]
+        GPT4O_VISION["gpt-4o\n(vision + reasoning)"]
+        GPT4O_TEXT["gpt-4o\n(text / reasoning)"]
+    end
+
+    subgraph STORAGE["☁️  File Storage"]
+        S3["AWS S3\n(STORAGE_BACKEND=s3)"]
+        LOCAL["Local FS · public/\n(STORAGE_BACKEND=local)"]
+    end
+
+    %% Client → Server requests
+    UI_UPLOAD -- "POST /api/documents/upload\n{file, tenant_id}" --> API_UPLOAD
+    UI_DOCS -- "GET /api/documents" --> API_DOCS
+    UI_DETAIL -- "GET /api/documents/{id}" --> API_DETAIL
+    UI_RB -- "POST /api/rule-books/upload" --> API_RB
+    SSE_LISTENER -- "GET /api/documents/{id}/timeline\n(EventSource — keep-alive)" --> API_TIMELINE
+
+    %% SSE back to client
+    SESSION_BUS -- "SSE events\nsession_started\nstep_started\nstep_completed\nsession_completed" --> API_TIMELINE
+    API_TIMELINE -- "text/event-stream\n→ live pipeline updates" --> SSE_LISTENER
+
+    %% Server kicks off pipelines
+    API_UPLOAD -- "background task" --> DOC_PIPELINE
+    API_RB -- "background task" --> RB_PIPELINE
+
+    %% Pipeline steps publish SSE events
+    DOC_PIPELINE -- "publish events per step" --> SESSION_BUS
+    RB_PIPELINE -- "publish events per step" --> SESSION_BUS
+
+    %% Pipeline ↔ DB
+    DOC_PIPELINE -- "read/write pipeline_runs\nextractions · validations\ndecisions" --> DB
+    RB_PIPELINE -- "write pipeline_runs\nextracted_rules (JSONB)" --> DB
+    API_DOCS & API_DETAIL --> DB
+
+    %% Pipeline ↔ File Storage
+    API_UPLOAD -- "PUT document file" --> S3
+    API_UPLOAD -- "PUT document file" --> LOCAL
+    DOC_PIPELINE -- "GET file bytes" --> S3
+    DOC_PIPELINE -- "GET file bytes" --> LOCAL
+    RB_PIPELINE -- "GET file bytes" --> S3
+    RB_PIPELINE -- "GET file bytes" --> LOCAL
+
+    %% LLM calls
+    EXTRACT -- "tool_choice=required\nextract_trade_document\n(text + base64 images)" --> GPT4O_VISION
+    RB_EXTRACT -- "tool_choice=required\nsubmit_rule_book\n(text + base64 images)" --> GPT4O_VISION
+    VALIDATE -- "tool_choice=required\nsubmit_validation" --> GPT4O_TEXT
+    DECIDE -- "tool_choice=required\nsubmit_decision" --> GPT4O_TEXT
+
+    %% Styles
+    classDef llmStep fill:#4f46e5,color:#fff,stroke:#3730a3
+    classDef manualStep fill:#0891b2,color:#fff,stroke:#0e7490
+    classDef clientBox fill:#1e293b,color:#e2e8f0,stroke:#334155
+    classDef extService fill:#065f46,color:#d1fae5,stroke:#047857
+    classDef sseArrow color:#f59e0b
+    class EXTRACT,VALIDATE,DECIDE,RB_EXTRACT llmStep
+    class PARSE,RB_PARSE manualStep
+    class GPT4O_VISION,GPT4O_TEXT extService
+    class S3,LOCAL extService
 ```
-┌─────────────────────────────────────────────────────────────────────┐
-│                        DOCUMENT UPLOAD                               │
-│    User drops PDF / image / DOCX via React UI                        │
-│    POST /api/documents/upload → returns {document_id, session_id}    │
-└──────────────────────────────┬──────────────────────────────────────┘
-                               │ async background task (FastAPI)
-                               ▼
-┌──────────────────────────────────────────────────────────────────────┐
-│  STEP 1 — PARSING  (mode: manual, no LLM tokens)                      │
-│  services/preprocessing.py                                            │
-│  • pdfplumber → extract native text  (fast path)                      │
-│  • pdf2image + Pillow → PNG pages    (vision fallback)                │
-│  • python-docx → text for DOCX                                        │
-│  Output: PreprocessedDocument { text, images_b64[], page_count }      │
-└──────────────────────────────┬───────────────────────────────────────┘
-                               │
-                               ▼
-┌──────────────────────────────────────────────────────────────────────┐
-│  STEP 2 — EXTRACTOR AGENT  (mode: llm, model: gpt-4o vision)          │
-│  agents/extractor.py                                                  │
-│  • Sends text + base64 images to gpt-4o                               │
-│  • Forces tool call: extract_trade_document                           │
-│  • Returns ExtractorOutput: {doc_type, fields{value, confidence,      │
-│    source_snippet}, notes}                                            │
-│  • Stored in DB: extractions table (tool_content + tool_output)       │
-└──────────────────────────────┬───────────────────────────────────────┘
-                               │
-                               ▼
-┌──────────────────────────────────────────────────────────────────────┐
-│  STEP 3 — VALIDATOR AGENT  (mode: llm, model: gpt-4o)                 │
-│  agents/validator.py                                                  │
-│  • Receives ExtractorOutput + active rule book rules                  │
-│  • Forces tool call: submit_validation                                │
-│  • Post-processing: confidence floor enforced in Python (not LLM)    │
-│  • Returns ValidatorOutput: {overall_status, results{}, summary}     │
-│  • Stored in DB: validations table                                    │
-└──────────────────────────────┬───────────────────────────────────────┘
-                               │
-                               ▼
-┌──────────────────────────────────────────────────────────────────────┐
-│  STEP 4 — ROUTER / DECISION AGENT  (mode: llm, model: gpt-4o)         │
-│  agents/router.py                                                     │
-│  • Receives ValidatorOutput                                           │
-│  • Forces tool call: submit_decision                                  │
-│  • Post-processing: outcome invariants enforced in Python (not LLM)  │
-│  • Returns RouterOutput: {outcome, reasoning, discrepancies[]}        │
-│  • Stored in DB: decisions table                                      │
-└──────────────────────────────┬───────────────────────────────────────┘
-                               │
-                               ▼
-┌──────────────────────────────────────────────────────────────────────┐
-│  STORAGE + SSE                                                        │
-│  • Every step → pipeline_runs row in DB (audit trail)                │
-│  • Every step → event published to in-memory SessionBus              │
-│  • Frontend EventSource GET /api/documents/{id}/timeline             │
-│    receives live step_started / step_completed / session_completed   │
-└──────────────────────────────────────────────────────────────────────┘
+
+### Rule Book Flow (Separate Pipeline)
+
+Rule books follow a **shorter 2-step pipeline** — parsing + LLM extraction only. No validation or decision steps run. The extracted rules are stored as JSONB and activated immediately for the tenant.
+
+```mermaid
+sequenceDiagram
+    actor Admin
+    participant Client as React Client
+    participant Server as FastAPI Server
+    participant OpenAI as OpenAI API (gpt-4o)
+    participant Storage as S3 / Local FS
+    participant DB as PostgreSQL
+
+    Admin->>Client: Upload rule book PDF
+    Client->>Server: POST /api/rule-books/upload
+    Server->>Storage: PUT rule_books/{tenant_id}/{doc_id}.pdf
+    Server-->>Client: { document_id, session_id }
+    Note over Server: Background task starts
+    Server->>DB: INSERT pipeline_sessions (type=rule_book)
+    Server->>DB: INSERT pipeline_runs (parsing, manual)
+    Server->>Storage: GET file bytes
+    Note over Server: pdfplumber + pdf2image
+    Server->>DB: UPDATE pipeline_runs (parsing=success)
+    Server->>DB: INSERT pipeline_runs (extraction, llm)
+    Server->>OpenAI: Chat completion<br/>tool: submit_rule_book<br/>tool_choice=required
+    OpenAI-->>Server: RuleBookExtractionOutput
+    Server->>DB: SET documents.extracted_rules (JSONB)
+    Server->>DB: SET documents.is_active = TRUE
+    Server->>DB: UPDATE pipeline_sessions (success)
+    Server-->>Client: SSE session_completed
+```
+
+### Document Pipeline — Client ↔ Server ↔ OpenAI ↔ S3 Flow
+
+```mermaid
+sequenceDiagram
+    actor User
+    participant Client as React Client
+    participant Server as FastAPI Server
+    participant OpenAI as OpenAI API (gpt-4o)
+    participant Storage as S3 / Local FS
+    participant DB as PostgreSQL
+
+    User->>Client: Drop PDF / image / DOCX
+    Client->>Server: POST /api/documents/upload
+    Server->>Storage: PUT documents/{tenant_id}/{doc_id}{ext}
+    Server-->>Client: { document_id, session_id }
+
+    Client->>Server: GET /api/documents/{id}/timeline (EventSource)
+    Note over Client,Server: SSE keep-alive connection open
+
+    Note over Server: Background pipeline task starts
+    Server-->>Client: SSE: session_started
+
+    Note over Server: STEP 1 — PARSING (manual)
+    Server-->>Client: SSE: step_started {parsing, manual}
+    Server->>Storage: GET file bytes
+    Note over Server: pdfplumber / pdf2image / python-docx
+    Server-->>Client: SSE: step_completed {parsing, success}
+
+    Note over Server: STEP 2 — EXTRACTION (LLM vision)
+    Server-->>Client: SSE: step_started {extraction, llm}
+    Server->>OpenAI: Chat completion · tool: extract_trade_document<br/>tool_choice=required · text + base64 images
+    OpenAI-->>Server: ExtractorOutput (doc_type, fields, confidence)
+    Server->>DB: INSERT extractions (tool_content, tool_output JSONB)
+    Server-->>Client: SSE: step_completed {extraction, success, tokens_in, tokens_out}
+
+    Note over Server: STEP 3 — VALIDATION (LLM text)
+    Server-->>Client: SSE: step_started {validation, llm}
+    Server->>DB: GET active rule book (extracted_rules JSONB)
+    Server->>OpenAI: Chat completion · tool: submit_validation<br/>tool_choice=required · ExtractorOutput + RuleSpecs
+    OpenAI-->>Server: ValidatorOutput (raw)
+    Note over Server: Python post-processing:<br/>_enforce_confidence_floor()<br/>_recompute_overall()
+    Server->>DB: INSERT validations (tool_content, tool_output JSONB)
+    Server-->>Client: SSE: step_completed {validation, success, tokens_in, tokens_out}
+
+    Note over Server: STEP 4 — DECISION (LLM text)
+    Server-->>Client: SSE: step_started {decision, llm}
+    Server->>OpenAI: Chat completion · tool: submit_decision<br/>tool_choice=required · ValidatorOutput
+    OpenAI-->>Server: RouterOutput (raw)
+    Note over Server: Python post-processing:<br/>_enforce_outcome_invariants()
+    Server->>DB: INSERT decisions (tool_content, tool_output JSONB)
+    Server->>DB: UPDATE documents.status = completed
+    Server-->>Client: SSE: step_completed {decision, success, tokens_in, tokens_out}
+    Server-->>Client: SSE: session_completed {status, total_tokens_in, total_tokens_out}
+    Note over Client: EventSource closes
 ```
 
 ### Agent Communication (Structured Handoff)
@@ -511,33 +655,59 @@ Rules are stored as `JSONB` in the `documents.extracted_rules` column and activa
 
 All agents use **OpenAI function calling** with `tool_choice="required"` — the model is forced to emit a tool call; free-text responses are rejected. Schemas are auto-generated from Pydantic models via `_schema_helpers.openai_strict_schema()`.
 
+> **Note on strict-mode schemas:** `openai_strict_schema()` walks the Pydantic JSON schema, inlines all `$ref`s, and recursively sets `required = all_properties` + `additionalProperties = false`. This is what OpenAI structured outputs require.
+
 ### `extract_trade_document` tool parameters
+
+Generated from `ExtractorOutput` + `ExtractedFields` (Pydantic). The `fields` object declares **eight canonical field names explicitly** (not `additionalProperties`) — this is how `ExtractedFields` is modelled so OpenAI strict mode keeps the model honest.
 
 ```json
 {
   "type": "object",
   "properties": {
-    "doc_type": { "type": "string", "enum": ["bill_of_lading","commercial_invoice","packing_list","certificate_of_origin","unknown"] },
+    "doc_type": {
+      "type": "string",
+      "enum": ["bill_of_lading", "commercial_invoice", "packing_list", "certificate_of_origin", "unknown"]
+    },
     "doc_type_confidence": { "type": "number", "minimum": 0.0, "maximum": 1.0 },
     "fields": {
       "type": "object",
-      "additionalProperties": {
-        "type": "object",
-        "properties": {
-          "value":          { "type": ["string", "null"] },
-          "confidence":     { "type": "number", "minimum": 0.0, "maximum": 1.0 },
-          "source_snippet": { "type": ["string", "null"] }
-        },
-        "required": ["value", "confidence", "source_snippet"],
-        "additionalProperties": false
-      }
+      "properties": {
+        "consignee_name":       { "$ref": "#ExtractedField" },
+        "hs_code":             { "$ref": "#ExtractedField" },
+        "port_of_loading":     { "$ref": "#ExtractedField" },
+        "port_of_discharge":   { "$ref": "#ExtractedField" },
+        "incoterms":           { "$ref": "#ExtractedField" },
+        "description_of_goods":{ "$ref": "#ExtractedField" },
+        "gross_weight":        { "$ref": "#ExtractedField" },
+        "invoice_number":      { "$ref": "#ExtractedField" }
+      },
+      "required": ["consignee_name","hs_code","port_of_loading","port_of_discharge","incoterms","description_of_goods","gross_weight","invoice_number"],
+      "additionalProperties": false
     },
-    "notes": { "type": ["string", "null"] }
+    "notes": { "anyOf": [{ "type": "string" }, { "type": "null" }] }
   },
   "required": ["doc_type", "doc_type_confidence", "fields", "notes"],
   "additionalProperties": false
 }
 ```
+
+**`ExtractedField` shape** (inlined for each field above):
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "value":          { "anyOf": [{ "type": "string" }, { "type": "null" }] },
+    "confidence":     { "type": "number", "minimum": 0.0, "maximum": 1.0 },
+    "source_snippet": { "anyOf": [{ "type": "string" }, { "type": "null" }] }
+  },
+  "required": ["value", "confidence", "source_snippet"],
+  "additionalProperties": false
+}
+```
+
+**Absent field:** `{ "value": null, "confidence": 0.0, "source_snippet": null }` — never hallucinated. `_normalize_tool_args()` also re-nests any top-level fields the LLM accidentally flattened.
 
 ### `submit_validation` tool parameters
 
@@ -594,6 +764,49 @@ All agents use **OpenAI function calling** with `tool_choice="required"` — the
     }
   },
   "required": ["outcome","reasoning","discrepancies"],
+  "additionalProperties": false
+}
+```
+
+### `submit_rule_book` tool parameters
+
+Generated from `RuleBookExtractionOutput` + `RuleSpec` + `RuleSpecPayload`. Used exclusively by the **Rule Book Extractor Agent** (`rule_book_extractor.py`).
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "customer_name_in_book": { "anyOf": [{ "type": "string" }, { "type": "null" }] },
+    "rules": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "field_name": { "type": "string" },
+          "rule_type":  { "type": "string", "enum": ["equals","regex","one_of","required","range","custom"] },
+          "spec": {
+            "type": "object",
+            "properties": {
+              "value":       { "anyOf": [{ "type": "string" }, { "type": "null" }] },
+              "values":      { "anyOf": [{ "type": "array", "items": { "type": "string" } }, { "type": "null" }] },
+              "pattern":     { "anyOf": [{ "type": "string" }, { "type": "null" }] },
+              "min":         { "anyOf": [{ "type": "number" }, { "type": "null" }] },
+              "max":         { "anyOf": [{ "type": "number" }, { "type": "null" }] },
+              "description": { "anyOf": [{ "type": "string" }, { "type": "null" }] }
+            },
+            "required": ["value","values","pattern","min","max","description"],
+            "additionalProperties": false
+          },
+          "severity":    { "type": "string", "enum": ["critical","major","minor"] },
+          "description": { "anyOf": [{ "type": "string" }, { "type": "null" }] }
+        },
+        "required": ["field_name","rule_type","spec","severity","description"],
+        "additionalProperties": false
+      }
+    },
+    "notes": { "anyOf": [{ "type": "string" }, { "type": "null" }] }
+  },
+  "required": ["customer_name_in_book","rules","notes"],
   "additionalProperties": false
 }
 ```

@@ -12,7 +12,7 @@ from app.prompts.validator import SYSTEM, USER_TEMPLATE
 from app.schemas.common import FieldStatus, OverallStatus
 from app.schemas.extraction import ExtractorOutput
 from app.schemas.rules import RuleSpec
-from app.schemas.validation import ValidatorOutput
+from app.schemas.validation import FieldValidation, ValidatorOutput
 from app.services.llm import ToolCallUsage, call_tool
 
 logger = get_logger(__name__)
@@ -46,7 +46,7 @@ async def run_validator(
             "rule_id": rule_id,
             "field_name": r.field_name,
             "rule_type": r.rule_type,
-            "spec": r.spec,
+            "spec": r.spec_as_dict(),
             "severity": r.severity.value,
             "description": r.description,
         }
@@ -61,7 +61,7 @@ async def run_validator(
                 "confidence": f.confidence,
                 "source_snippet": f.source_snippet,
             }
-            for name, f in extraction.fields.items()
+            for name, f in extraction.fields.as_dict().items()
         },
     }
     user = USER_TEMPLATE.format(
@@ -82,6 +82,7 @@ async def run_validator(
     )
 
     parsed = ValidatorOutput.model_validate(result.tool_arguments)
+    parsed = _fill_missing_rule_results(parsed, extraction, rules)
     parsed = _enforce_confidence_floor(parsed, extraction, settings.LOW_CONFIDENCE_THRESHOLD)
     parsed = _recompute_overall(parsed)
     tool_output = parsed.model_dump(mode="json")
@@ -102,14 +103,61 @@ async def run_validator(
     )
 
 
+_RULES_REQUIRING_VALUE = {"equals", "one_of", "regex", "required"}
+
+
+def _fill_missing_rule_results(
+    out: ValidatorOutput,
+    extraction: ExtractorOutput,
+    rules: list[tuple[str, RuleSpec]],
+) -> ValidatorOutput:
+    """Guarantee every rule-covered field has a result entry.
+
+    When the LLM returns an empty or partial results dict (common when all
+    extracted values are null), synthesize a deterministic verdict so the
+    pipeline never silently approves an empty extraction:
+      - null value for a rule that requires a value  → mismatch
+      - non-null value but LLM omitted the entry     → uncertain (safe default)
+    """
+    new_results = dict(out.results)
+    extracted_fields = extraction.fields.as_dict()
+    for rule_id, r in rules:
+        if r.field_name in new_results:
+            continue
+        extracted = extracted_fields.get(r.field_name)
+        value_is_null = extracted is None or extracted.value is None
+
+        if value_is_null and r.rule_type in _RULES_REQUIRING_VALUE:
+            new_results[r.field_name] = FieldValidation(
+                status=FieldStatus.MISMATCH,
+                found=None,
+                expected=r.description or r.rule_type,
+                severity=r.severity,
+                reasoning=f"Field is absent in the extracted document; rule '{r.rule_type}' requires a value.",
+                rule_id=rule_id,
+            )
+        elif not value_is_null:
+            new_results[r.field_name] = FieldValidation(
+                status=FieldStatus.UNCERTAIN,
+                found=extracted.value if extracted else None,
+                expected=r.description or r.rule_type,
+                severity=r.severity,
+                reasoning="Validator did not return a result for this field; marking uncertain.",
+                rule_id=rule_id,
+            )
+
+    return out.model_copy(update={"results": new_results})
+
+
 def _enforce_confidence_floor(
     out: ValidatorOutput,
     extraction: ExtractorOutput,
     threshold: float,
 ) -> ValidatorOutput:
     new_results = dict(out.results)
+    extracted_fields = extraction.fields.as_dict()
     for name, verdict in new_results.items():
-        extracted = extraction.fields.get(name)
+        extracted = extracted_fields.get(name)
         if extracted is None:
             continue
         if extracted.confidence < threshold and verdict.status == FieldStatus.MATCH:

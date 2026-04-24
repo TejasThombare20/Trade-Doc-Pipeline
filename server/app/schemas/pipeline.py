@@ -43,6 +43,7 @@ class DocumentDetail(BaseModel):
     status: DocumentStatus
     is_active: bool
     created_at: datetime
+    file_url: str | None = None
     extraction: dict | None = None
     validation: dict | None = None
     decision: dict | None = None

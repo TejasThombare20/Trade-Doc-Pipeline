@@ -32,7 +32,7 @@ CORE PRINCIPLES:
      "has_uncertain" if any uncertain but no mismatch
      "has_mismatch" if any mismatch (takes precedence over uncertain)
 
-Return JSON matching the provided schema exactly."""
+Submit your verdict by calling the `submit_validation` tool."""
 
 
 USER_TEMPLATE = """CUSTOMER RULES (JSON):

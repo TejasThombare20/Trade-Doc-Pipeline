@@ -247,8 +247,9 @@ function StepResponsePreview({
   response: Record<string, unknown>;
 }) {
   if (stepType === "parsing") {
+    const parsedText = response.parsed_text as string | undefined;
     return (
-      <div className="text-sm bg-muted rounded-lg p-3 space-y-1 border border-border">
+      <div className="text-sm bg-muted rounded-lg p-3 space-y-2 border border-border">
         <div className="text-muted-foreground">
           <span className="font-medium text-foreground">{response.source_kind as string}</span>
           {" · "}
@@ -259,6 +260,16 @@ function StepResponsePreview({
         </div>
         {response.notes && (
           <div className="text-xs text-amber-500">{response.notes as string}</div>
+        )}
+        {parsedText && parsedText.length > 0 && (
+          <details className="text-xs group">
+            <summary className="cursor-pointer text-muted-foreground hover:text-foreground select-none">
+              View parsed content
+            </summary>
+            <pre className="mt-2 bg-background rounded border border-border p-2 max-h-72 overflow-auto whitespace-pre-wrap text-foreground">
+              {parsedText}
+            </pre>
+          </details>
         )}
       </div>
     );

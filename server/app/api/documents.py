@@ -120,6 +120,7 @@ async def get_document(document_id: UUID, ctx: TenantContext = Depends(get_tenan
         status=DocumentStatus(doc["status"]),
         is_active=doc["is_active"],
         created_at=doc["created_at"],
+        file_url=f"/api/files/{doc['storage_key']}" if doc.get("storage_key") else None,
         extraction=extraction,
         validation=validation,
         decision=decision,

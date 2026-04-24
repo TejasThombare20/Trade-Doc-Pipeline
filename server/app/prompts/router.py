@@ -19,7 +19,7 @@ OUTPUT RULES:
 3. Never omit an uncertain field from discrepancies when outcome is
    human_review or draft_amendment — the operator needs to see it.
 
-Return JSON matching the provided schema exactly."""
+Submit your decision by calling the `submit_decision` tool."""
 
 
 USER_TEMPLATE = """VALIDATOR OUTPUT (JSON):

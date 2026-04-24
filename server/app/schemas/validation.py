@@ -24,7 +24,7 @@ class ValidatorOutput(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     overall_status: OverallStatus
-    results: dict[str, FieldValidation]
+    results: dict[str, FieldValidation] = Field(default_factory=dict)
     summary: str = Field(
         description="One or two sentences a human can read to understand the overall state."
     )

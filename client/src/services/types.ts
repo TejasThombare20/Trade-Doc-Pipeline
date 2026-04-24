@@ -54,6 +54,7 @@ export interface DocumentDetail {
   status: DocumentStatus;
   is_active: boolean;
   created_at: string;
+  file_url: string | null;
   extraction: Record<string, unknown> | null;
   validation: Record<string, unknown> | null;
   decision: Record<string, unknown> | null;

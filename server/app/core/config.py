@@ -86,10 +86,6 @@ class Settings(BaseSettings):
         return v
 
     def model_post_init(self, __context) -> None:
-        # When RUN_ENV=local, force local storage so uploads go to the public folder.
-        if self.RUN_ENV == "local" and self.STORAGE_BACKEND != "local":
-            object.__setattr__(self, "STORAGE_BACKEND", "local")
-
         if self.STORAGE_BACKEND == "s3":
             missing = [
                 k for k in ("S3_BUCKET", "S3_REGION", "AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY")

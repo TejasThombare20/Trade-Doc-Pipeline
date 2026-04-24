@@ -8,6 +8,9 @@ invisible to callers.
 
 from __future__ import annotations
 
+import hashlib
+import uuid
+
 from app.core.config import get_settings
 from app.core.logging import get_logger
 from app.services.llm_providers.base import (
@@ -68,6 +71,51 @@ async def call_tool(
     Delegates to whichever provider is active.
     """
     provider = _get_provider()
+    settings = get_settings()
+
+    sanitized_user_content = _sanitize_user_content(user_content)
+    tool_definition = {
+        "type": "function",
+        "function": {
+            "name": tool_name,
+            "description": tool_description,
+            "parameters": tool_parameters,
+        },
+    }
+    request_body = {
+        "model": model,
+        "temperature": temperature,
+        "max_tokens": max_tokens,
+        "messages": [
+            {"role": "system", "content": system},
+            {"role": "user", "content": sanitized_user_content},
+        ],
+        "tools": [tool_definition],
+        "tool_choice": {"type": "function", "function": {"name": tool_name}},
+    }
+    cache_key = _cache_key(system, sanitized_user_content, tool_definition, model, temperature)
+    request_id = uuid.uuid4().hex[:12]
+
+    logger.info(
+        "llm_call_tool_request",
+        extra={
+            "request_id": request_id,
+            "provider": settings.LLM_PROVIDER,
+            "model": model,
+            "tool_name": tool_name,
+            "tool_description": tool_description,
+            "tool_parameters_schema": tool_parameters,
+            "tool_choice": request_body["tool_choice"],
+            "available_tools": [tool_name],
+            "temperature": temperature,
+            "max_tokens": max_tokens,
+            "cache_key": cache_key,
+            "system_prompt": system,
+            "user_prompt": sanitized_user_content,
+            "request_body": request_body,
+        },
+    )
+
     return await provider.call_tool(
         model=model,
         system=system,
@@ -78,6 +126,54 @@ async def call_tool(
         temperature=temperature,
         max_tokens=max_tokens,
     )
+
+
+def _sanitize_user_content(user_content: list[dict] | str) -> str | list[dict]:
+    """Strip heavy base64 image payloads so logs stay readable."""
+    if isinstance(user_content, str):
+        return user_content
+    summarized: list[dict] = []
+    for part in user_content:
+        if isinstance(part, dict) and part.get("type") in {"image_url", "image", "input_image"}:
+            image_url = part.get("image_url")
+            url = image_url.get("url") if isinstance(image_url, dict) else None
+            size_hint = len(url) if isinstance(url, str) else None
+            summarized.append({
+                "type": part.get("type"),
+                "omitted": "image_payload",
+                "payload_bytes": size_hint,
+            })
+        else:
+            summarized.append(part)
+    return summarized
+
+
+def _cache_key(
+    system: str,
+    user_content: str | list[dict],
+    tool_definition: dict,
+    model: str,
+    temperature: float,
+) -> str:
+    """Stable hash of the inputs that determine a response.
+
+    Useful for correlating repeated calls in logs; not used for actual caching
+    today but the key is deterministic so a cache layer can be added later.
+    """
+    import json as _json
+    payload = _json.dumps(
+        {
+            "model": model,
+            "temperature": temperature,
+            "system": system,
+            "user": user_content,
+            "tool": tool_definition,
+        },
+        sort_keys=True,
+        ensure_ascii=False,
+        default=str,
+    )
+    return hashlib.sha256(payload.encode("utf-8")).hexdigest()[:16]
 
 
 def build_vision_user_content(

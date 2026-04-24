@@ -170,6 +170,7 @@ async def run_document_pipeline(
             "text_len": len(pre.text),
             "image_count": len(pre.images_b64),
             "notes": pre.notes,
+            "parsed_text": _truncate_parsed_text(pre.text),
         }
     except Exception as exc:
         logger.exception("parsing_failed")
@@ -187,10 +188,12 @@ async def run_document_pipeline(
             conn, tenant_id=tenant_id, document_id=document_id, status="extracting",
         )
 
+    rules = _rules_from_extracted(active_rb["extracted_rules"])
+
     # -------- step 2: extraction (llm) --------
     run_id = await _start_step(ctx, "extraction", "llm")
     try:
-        ext_res = await run_extractor(pre)
+        ext_res = await run_extractor(pre, rules=rules)
     except Exception as exc:
         logger.exception("extraction_failed")
         await _finish_step(ctx, run_id, "fail", {"error": str(exc)}, None, None, "extraction")
@@ -223,8 +226,6 @@ async def run_document_pipeline(
     # -------- step 3: validation (llm) --------
     run_id = await _start_step(ctx, "validation", "llm")
     try:
-        rule_book_id = active_rb["id"]
-        rules = _rules_from_extracted(active_rb["extracted_rules"])
         val_res = await run_validator(extraction=ext_res.output, rules=rules)
     except Exception as exc:
         logger.exception("validation_failed")
@@ -322,6 +323,7 @@ async def run_rule_book_pipeline(
             "text_len": len(pre.text),
             "image_count": len(pre.images_b64),
             "notes": pre.notes,
+            "parsed_text": _truncate_parsed_text(pre.text),
         }
     except Exception as exc:
         logger.exception("rb_parsing_failed")
@@ -380,6 +382,17 @@ async def run_rule_book_pipeline(
         )
 
     await _complete_session(ctx, "success", tokens_in, tokens_out, None)
+
+
+_PARSED_TEXT_MAX_CHARS = 20000
+
+
+def _truncate_parsed_text(text: str) -> str:
+    if not text:
+        return ""
+    if len(text) <= _PARSED_TEXT_MAX_CHARS:
+        return text
+    return text[:_PARSED_TEXT_MAX_CHARS] + f"\n\n…[truncated {len(text) - _PARSED_TEXT_MAX_CHARS} chars]"
 
 
 def _rules_from_extracted(raw: Any) -> list[tuple[str, RuleSpec]]:
