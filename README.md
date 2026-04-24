@@ -1,4 +1,4 @@
-# Nova — Trade Document Pipeline
+<img width="2546" height="1393" alt="image" src="https://github.com/user-attachments/assets/eb128c05-1555-45db-bdde-80f50cfc058e" /># Nova — Trade Document Pipeline
 
 A multi-agent system that ingests trade documents (Bill of Lading, Commercial Invoice, Packing List, Certificate of Origin), extracts structured fields via a vision LLM, validates them against customer-specific rule books, and routes each document to one of three outcomes: **auto-approve**, **human review**, or **draft amendment**.
 
@@ -8,7 +8,23 @@ A multi-agent system that ingests trade documents (Bill of Lading, Commercial In
 
 > **📸 Output Screenshots**
 > _Add screenshots of the pipeline output here — drag and drop images below this line._
->
+><img width="2546" height="1393" alt="image" src="https://github.com/user-attachments/assets/4d73054e-486c-44c8-b2f0-d417c1cbd6ad" /> 
+<img width="1695" height="905" alt="image" src="https://github.com/user-attachments/assets/c04064c0-fa50-48ba-8407-7e7fe8efaebf" />
+
+
+--- compliant example ---
+
+<img width="2546" height="1393" alt="image" src="https://github.com/user-attachments/assets/4a43c215-dc3b-4c7b-81f3-20420dbc3753" />
+<img width="2546" height="1393" alt="image" src="https://github.com/user-attachments/assets/63c84a79-c12c-440d-9585-3ef5273c4ac5" />
+
+ --- non compliant example --- 
+ <img width="2546" height="1393" alt="image" src="https://github.com/user-attachments/assets/52a29565-3e42-4597-8e17-b5326458ac9a" />
+ <img width="2546" height="1393" alt="image" src="https://github.com/user-attachments/assets/ee2041dc-6c3a-44fd-90d2-3e55a8fe3f3c" />
+
+
+
+
+
 > <!-- SCREENSHOT PLACEHOLDER: Upload page with live SSE timeline -->
 > <!-- SCREENSHOT PLACEHOLDER: Document detail page showing extracted fields, validation table, and routing decision -->
 > <!-- SCREENSHOT PLACEHOLDER: Rule Books admin page -->
@@ -16,8 +32,13 @@ A multi-agent system that ingests trade documents (Bill of Lading, Commercial In
 
 > **🎬 Screen Recording**
 > _Add a screen recording (GIF or MP4) of a full end-to-end pipeline run below._
->
-> <!-- SCREENRECORD PLACEHOLDER: Full pipeline run from upload → parsing → extraction → validation → decision → result -->
+> 
+
+https://github.com/user-attachments/assets/8961d117-2702-4aaf-b338-9b39e5313cef
+
+
+
+> 
 
 ---
 
