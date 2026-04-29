@@ -31,18 +31,19 @@ class DocumentRepository:
         original_name: str,
         mime_type: str,
         size_bytes: int,
+        job_id: UUID | None = None,
     ) -> asyncpg.Record:
         return await self._conn.fetchrow(
             """
             INSERT INTO documents
-                (id, tenant_id, type, storage_key, original_name,
+                (id, tenant_id, job_id, type, storage_key, original_name,
                  mime_type, size_bytes, status, is_active)
-            VALUES ($1, $2, $3, $4, $5, $6, $7, 'uploaded', FALSE)
-            RETURNING id, tenant_id, session_id, type, storage_key,
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'uploaded', FALSE)
+            RETURNING id, tenant_id, job_id, session_id, type, storage_key,
                       original_name, mime_type, size_bytes, doc_type, status,
-                      is_active, extracted_rules, created_at, updated_at
+                      is_active, file_url, file_url_expires_at, created_at, updated_at
             """,
-            document_id, tenant_id, type, storage_key, original_name,
+            document_id, tenant_id, job_id, type, storage_key, original_name,
             mime_type, size_bytes,
         )
 
@@ -80,20 +81,21 @@ class DocumentRepository:
             tenant_id, document_id, status, doc_type,
         )
 
-    async def set_extracted_rules(
+    async def set_file_url(
         self,
         *,
         tenant_id: UUID,
         document_id: UUID,
-        rules: list[dict],
+        file_url: str,
+        file_url_expires_at,
     ) -> None:
         await self._conn.execute(
             """
             UPDATE documents
-            SET extracted_rules = $3::jsonb, updated_at = now()
+            SET file_url = $3, file_url_expires_at = $4, updated_at = now()
             WHERE tenant_id = $1 AND id = $2
             """,
-            tenant_id, document_id, json.dumps(rules),
+            tenant_id, document_id, file_url, file_url_expires_at,
         )
 
     async def activate_rule_book(
@@ -128,9 +130,9 @@ class DocumentRepository:
     ) -> asyncpg.Record | None:
         return await self._conn.fetchrow(
             """
-            SELECT id, tenant_id, session_id, type, storage_key,
+            SELECT id, tenant_id, job_id, session_id, type, storage_key,
                    original_name, mime_type, size_bytes, doc_type, status,
-                   is_active, extracted_rules, created_at, updated_at
+                   is_active, file_url, file_url_expires_at, created_at, updated_at
             FROM documents
             WHERE tenant_id = $1 AND id = $2
             """,
@@ -145,7 +147,7 @@ class DocumentRepository:
         return await self._conn.fetchrow(
             """
             SELECT id, tenant_id, storage_key, original_name, mime_type,
-                   size_bytes, status, extracted_rules, created_at
+                   size_bytes, status, created_at
             FROM documents
             WHERE tenant_id = $1
               AND type = 'rule_book' AND is_active = TRUE AND status = 'completed'
@@ -181,8 +183,8 @@ class DocumentRepository:
         return await self._conn.fetch(
             """
             SELECT id, tenant_id, session_id, original_name, mime_type,
-                   size_bytes, status, is_active, extracted_rules, storage_key,
-                   created_at, updated_at
+                   size_bytes, status, is_active, storage_key,
+                   file_url, file_url_expires_at, created_at, updated_at
             FROM documents
             WHERE tenant_id = $1 AND type = 'rule_book'
             ORDER BY created_at DESC
@@ -401,6 +403,37 @@ class DocumentRepository:
             json.dumps(tool_content), json.dumps(tool_output),
         )
         return row["id"]
+
+    async def get_rule_book_rules(
+        self,
+        *,
+        tenant_id: UUID,
+        document_id: UUID,
+    ) -> list[dict] | None:
+        """Read extracted rules from the extractions table for a rule book document.
+
+        Returns the rules list from tool_output, or None if no extraction exists.
+        """
+        row = await self._conn.fetchrow(
+            """
+            SELECT e.tool_output
+            FROM extractions e
+            JOIN documents d ON d.id = e.document_id
+            WHERE e.tenant_id = $1
+              AND e.document_id = $2
+              AND d.type = 'rule_book'
+            ORDER BY e.created_at DESC
+            LIMIT 1
+            """,
+            tenant_id, document_id,
+        )
+        if row is None:
+            return None
+        raw = row["tool_output"]
+        if isinstance(raw, str):
+            raw = json.loads(raw)
+        # tool_output shape: {"rules": [...], "customer_name_in_book": ..., "notes": ...}
+        return raw.get("rules") if isinstance(raw, dict) else None
 
     async def get_latest_extraction(
         self,

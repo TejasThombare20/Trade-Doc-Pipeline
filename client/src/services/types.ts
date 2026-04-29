@@ -25,26 +25,83 @@ export type StageName =
 
 export type StepStatus = "pending" | "success" | "fail";
 
+export type JobStatus =
+  | "pending"
+  | "processing"
+  | "completed"
+  | "partial_failure"
+  | "failed";
+
 export interface TenantOption {
   id: string;
   name: string;
   slug: string;
 }
 
-export interface DocumentListItem {
+export interface SessionInfo {
+  tenant_id: string;
+  tenant_name: string;
+  tenant_slug: string;
+  role: "admin" | "default";
+  session_id: string;
+}
+
+// ─── jobs ─────────────────────────────────────────────────────────────────────
+
+export interface JobListItem {
+  id: string;
+  tenant_id: string;
+  rule_book_id: string;
+  status: JobStatus;
+  document_count: number;
+  is_active: boolean;
+  started_at: string | null;
+  completed_at: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface JobDocumentSummary {
   id: string;
   original_name: string;
-  type: "document" | "rule_book";
+  session_id: string | null;
   doc_type: string | null;
   status: DocumentStatus;
   outcome: Outcome | null;
-  is_active: boolean;
+  mime_type: string;
+  size_bytes: number;
   created_at: string;
 }
+
+export interface JobDetail extends JobListItem {
+  documents: JobDocumentSummary[];
+}
+
+export interface CreateJobResponse {
+  job_id: string;
+  rule_book_id: string;
+  status: JobStatus;
+  documents: {
+    document_id: string;
+    original_name: string;
+    mime_type: string;
+    size_bytes: number;
+    status: DocumentStatus;
+  }[];
+}
+
+export interface StartJobResponse {
+  job_id: string;
+  status: JobStatus;
+  document_count: number;
+}
+
+// ─── documents (detail only — list view is at the job level) ─────────────────
 
 export interface DocumentDetail {
   id: string;
   tenant_id: string;
+  job_id: string | null;
   session_id: string | null;
   type: "document" | "rule_book";
   original_name: string;
@@ -107,11 +164,7 @@ export interface SSESessionEvent {
 
 export type SSEEvent = SSESnapshot | SSEStepEvent | SSESessionEvent;
 
-export interface UploadResponse {
-  document_id: string;
-  session_id: string;
-  status: string;
-}
+// ─── rule books ───────────────────────────────────────────────────────────────
 
 export interface RuleBookBundle {
   document: {
@@ -136,6 +189,8 @@ export interface RuleBookUploadResponse {
   session_id: string;
   status: string;
 }
+
+// ─── extraction / validation / decision shapes ───────────────────────────────
 
 export interface ExtractedField {
   value: string | null;

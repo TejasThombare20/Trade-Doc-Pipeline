@@ -2,12 +2,15 @@
 
 from __future__ import annotations
 
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import aiofiles
 import aiofiles.os
 
-from app.storage.base import Storage, StoredObject
+from app.storage.base import SignedUrl, Storage, StoredObject
+
+_LOCAL_URL_TTL_HOURS = 24 * 365  # effectively permanent for local dev
 
 
 class LocalStorage:
@@ -45,3 +48,16 @@ class LocalStorage:
     async def exists(self, key: str) -> bool:
         path = self._resolve(key)
         return await aiofiles.os.path.exists(path)
+
+    async def get_url(self, key: str, *, expiry_hours: int = 1) -> SignedUrl:
+        """For local storage, return the public path under /public.
+
+        The key is served statically by Vite from client/public/.
+        The file must exist there; the frontend shows an error if it doesn't.
+        """
+        # Strip leading path segments that aren't relevant to the public URL.
+        # key example: "documents/<tenant>/<uuid>.pdf"
+        # We store under client/public/ so the public path is "/<key>".
+        url = f"/public/{key}"
+        expires_at = datetime.now(tz=timezone.utc) + timedelta(hours=_LOCAL_URL_TTL_HOURS)
+        return SignedUrl(url=url, expires_at=expires_at)

@@ -51,7 +51,7 @@ export function Timeline({ documentId, sessionId }: TimelineProps) {
   useEffect(() => {
     if (!documentId) return;
 
-    const url = `/api/documents/${documentId}/timeline`;
+    const url = `/v1/documents/${documentId}/timeline`;
     const es = new EventSource(url, { withCredentials: true });
     eventSourceRef.current = es;
 

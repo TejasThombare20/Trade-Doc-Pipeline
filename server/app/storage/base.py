@@ -1,8 +1,9 @@
-"""Storage protocol. Backends implement these four operations."""
+"""Storage protocol. Backends implement these operations."""
 
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import datetime
 from typing import Protocol
 
 
@@ -13,6 +14,14 @@ class StoredObject:
     key: str
     size_bytes: int
     backend: str
+
+
+@dataclass(frozen=True)
+class SignedUrl:
+    """A time-limited URL for direct client access to a stored object."""
+
+    url: str
+    expires_at: datetime  # always UTC
 
 
 class Storage(Protocol):
@@ -31,4 +40,8 @@ class Storage(Protocol):
         ...
 
     async def exists(self, key: str) -> bool:
+        ...
+
+    async def get_url(self, key: str, *, expiry_hours: int = 1) -> SignedUrl:
+        """Return a signed/public URL valid for `expiry_hours` hours."""
         ...

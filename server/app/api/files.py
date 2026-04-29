@@ -1,46 +1,66 @@
-"""Serve uploaded files by storage key.
+"""Return a signed/public URL for a document by document_id.
 
-The frontend can't read local paths directly, so the backend serves them
-at /api/files/<storage_key>. For S3, we could redirect to a presigned URL,
-but for simplicity (and local dev) we just stream the bytes.
+For Azure Blob (private container): generates a SAS token, valid for 1 hour.
+For S3: generates a presigned URL, valid for 1 hour.
+For local: returns a static path under /public/.
+
+The URL + expiry are cached in documents.file_url / file_url_expires_at.
+On each request we check expiry (with a 5-minute buffer) and regenerate if needed.
 """
 
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends
-from fastapi.responses import Response
+from datetime import datetime, timedelta, timezone
+from uuid import UUID
 
-from app.api.deps import get_tenant_context
+from fastapi import APIRouter, Depends
+from fastapi.responses import JSONResponse
+
+from app.api.deps import get_document_repo, get_tenant_context
 from app.core.errors import NotFoundError
+from app.repositories.documents import DocumentRepository
 from app.schemas.api import TenantContext
 from app.storage import get_storage
 
-router = APIRouter(prefix="/api/files", tags=["files"])
+router = APIRouter(prefix="/v1/files", tags=["files"])
+
+_EXPIRY_BUFFER = timedelta(minutes=5)
+_SAS_EXPIRY_HOURS = 1
 
 
-@router.get("/{storage_key:path}")
-async def get_file(
-    storage_key: str,
+@router.get("/{document_id}")
+async def get_file_url(
+    document_id: UUID,
     ctx: TenantContext = Depends(get_tenant_context),
+    repo: DocumentRepository = Depends(get_document_repo),
 ):
-    """Serve an uploaded file by its storage key.
-
-    The tenant check ensures the key belongs to their namespace (storage keys
-    are prefixed with tenant_id). This is a simple check for Part 1.
-    """
-    # Basic tenant isolation: storage keys start with "documents/<tenant>" or "rule_books/<tenant>"
-    tenant_str = str(ctx.tenant_id)
-    if tenant_str not in storage_key:
+    doc = await repo.get_document(tenant_id=ctx.tenant_id, document_id=document_id)
+    if doc is None:
         raise NotFoundError("file not found")
 
+    now = datetime.now(tz=timezone.utc)
+    cached_url: str | None = doc["file_url"]
+    cached_expires: datetime | None = doc["file_url_expires_at"]
+
+    # Use cached URL if it's still valid (with buffer time).
+    if cached_url and cached_expires:
+        expires = cached_expires if cached_expires.tzinfo else cached_expires.replace(tzinfo=timezone.utc)
+        if expires - now > _EXPIRY_BUFFER:
+            return JSONResponse({"url": cached_url, "expires_at": expires.isoformat()})
+
+    # Generate a fresh signed URL.
     storage = get_storage()
     try:
-        data = await storage.get(storage_key)
+        signed = await storage.get_url(doc["storage_key"], expiry_hours=_SAS_EXPIRY_HOURS)
     except Exception:
         raise NotFoundError("file not found")
 
-    # Guess content type from the key extension
-    import mimetypes
-    content_type = mimetypes.guess_type(storage_key)[0] or "application/octet-stream"
+    # Persist URL and expiry back to DB.
+    await repo.set_file_url(
+        tenant_id=ctx.tenant_id,
+        document_id=document_id,
+        file_url=signed.url,
+        file_url_expires_at=signed.expires_at,
+    )
 
-    return Response(content=data, media_type=content_type)
+    return JSONResponse({"url": signed.url, "expires_at": signed.expires_at.isoformat()})

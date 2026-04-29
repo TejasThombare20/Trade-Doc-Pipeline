@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
+from datetime import datetime, timedelta, timezone
+
 import aioboto3
 from botocore.exceptions import ClientError
 
-from app.storage.base import Storage, StoredObject
+from app.storage.base import SignedUrl, Storage, StoredObject
 
 
 class S3Storage:
@@ -65,3 +67,15 @@ class S3Storage:
                 if e.response["Error"]["Code"] in ("NoSuchKey", "404", "NotFound"):
                     return False
                 raise
+
+    async def get_url(self, key: str, *, expiry_hours: int = 1) -> SignedUrl:
+        """Generate a presigned GET URL for the S3 object."""
+        expiry_secs = expiry_hours * 3600
+        async with self._client() as s3:
+            url = await s3.generate_presigned_url(
+                "get_object",
+                Params={"Bucket": self._bucket, "Key": key},
+                ExpiresIn=expiry_secs,
+            )
+        expires_at = datetime.now(tz=timezone.utc) + timedelta(hours=expiry_hours)
+        return SignedUrl(url=url, expires_at=expires_at)

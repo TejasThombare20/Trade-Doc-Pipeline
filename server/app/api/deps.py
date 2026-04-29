@@ -11,13 +11,12 @@ from fastapi import Cookie, Depends
 from app.core.auth import decode_token
 from app.core.errors import AuthError, ForbiddenError
 from app.db.pool import DbPool, get_db_pool
-from app.repositories.customers import CustomerRepository
 from app.repositories.documents import DocumentRepository
 from app.repositories.tenants import TenantRepository
 from app.schemas.api import TenantContext
 from app.schemas.common import UserRole
-from app.services.documents import DocumentService, get_document_service
 from app.services.events import SessionBus, get_event_bus_service
+from app.services.jobs import JobService, get_job_service
 from app.services.pipeline import PipelineService, get_pipeline_service
 from app.services.rule_books import RuleBookService, get_rule_book_service
 
@@ -62,12 +61,6 @@ def get_document_repo(
     return DocumentRepository(conn)
 
 
-def get_customer_repo(
-    conn: asyncpg.Connection = Depends(get_conn),
-) -> CustomerRepository:
-    return CustomerRepository(conn)
-
-
 def get_tenant_repo(
     conn: asyncpg.Connection = Depends(get_conn),
 ) -> TenantRepository:
@@ -80,12 +73,12 @@ def get_pipeline_svc() -> PipelineService:
     return get_pipeline_service()
 
 
-def get_document_svc() -> DocumentService:
-    return get_document_service()
-
-
 def get_rule_book_svc() -> RuleBookService:
     return get_rule_book_service()
+
+
+def get_job_svc() -> JobService:
+    return get_job_service()
 
 
 def get_bus_svc() -> SessionBus:

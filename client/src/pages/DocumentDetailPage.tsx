@@ -5,7 +5,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { DocumentStatusBadge } from "@/components/StatusBadges";
 import { Timeline } from "@/components/Timeline";
-import { getDocument } from "@/services/api";
+import { getDocument, getFileUrl } from "@/services/api";
 import type { DocumentDetail } from "@/services/types";
 import { formatBytes, formatRelative } from "@/lib/utils";
 
@@ -13,6 +13,22 @@ export function DocumentDetailPage() {
   const { id } = useParams<{ id: string }>();
   const [doc, setDoc] = useState<DocumentDetail | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [fileUrlError, setFileUrlError] = useState<string | null>(null);
+  const [loadingFileUrl, setLoadingFileUrl] = useState(false);
+
+  const handleViewDocument = async () => {
+    if (!doc) return;
+    setFileUrlError(null);
+    setLoadingFileUrl(true);
+    try {
+      const { url } = await getFileUrl(doc.id);
+      window.open(url, "_blank", "noopener,noreferrer");
+    } catch {
+      setFileUrlError("Can't load this file. It may have been moved or is unavailable.");
+    } finally {
+      setLoadingFileUrl(false);
+    }
+  };
 
   useEffect(() => {
     if (!id) return;
@@ -32,7 +48,7 @@ export function DocumentDetailPage() {
     return (
       <div className="space-y-4">
         <Link to="/" className="text-sm text-primary hover:underline flex items-center gap-1">
-          <ArrowLeft className="h-4 w-4" /> Back to documents
+          <ArrowLeft className="h-4 w-4" /> Back to jobs
         </Link>
         <div className="text-destructive">{error}</div>
       </div>
@@ -72,16 +88,20 @@ export function DocumentDetailPage() {
         </div>
         <div className="flex items-center gap-2">
           {doc.file_url && (
-            <Button
-              variant="outline"
-              size="sm"
-              asChild
-            >
-              <a href={doc.file_url} target="_blank" rel="noopener noreferrer">
+            <div className="flex flex-col items-end gap-1">
+              <Button
+                variant="outline"
+                size="sm"
+                disabled={loadingFileUrl}
+                onClick={handleViewDocument}
+              >
                 <ExternalLink className="h-4 w-4 mr-1.5" />
-                View document
-              </a>
-            </Button>
+                {loadingFileUrl ? "Loading…" : "View document"}
+              </Button>
+              {fileUrlError && (
+                <span className="text-xs text-destructive">{fileUrlError}</span>
+              )}
+            </div>
           )}
           <DocumentStatusBadge status={doc.status} />
         </div>
@@ -196,7 +216,7 @@ function ValidationView({ data }: { data: Record<string, unknown> }) {
           {(data.overall_status as string)?.replace(/_/g, " ")}
         </span>
       </div>
-      {data.summary && <div className="text-sm text-muted-foreground">{data.summary as string}</div>}
+      {data.summary && <div className="text-sm text-muted-foreground">{String(data.summary)}</div>}
       {entries.length === 0 ? (
         <div className="text-sm text-muted-foreground italic">No field-level results returned by the validator.</div>
       ) : (
@@ -259,7 +279,7 @@ function DecisionView({ data }: { data: Record<string, unknown> }) {
           {(data.outcome as string)?.replace(/_/g, " ")}
         </span>
       </div>
-      {data.reasoning && <div className="text-sm text-muted-foreground">{data.reasoning as string}</div>}
+      {data.reasoning && <div className="text-sm text-muted-foreground">{String(data.reasoning)}</div>}
       <div className="overflow-x-auto">
         <table className="w-full text-sm">
           <thead className="text-xs text-muted-foreground">
@@ -287,7 +307,7 @@ function DecisionView({ data }: { data: Record<string, unknown> }) {
                   </td>
                   <td className="py-2 px-3 text-xs text-foreground">{(d.found as string) || "—"}</td>
                   <td className="py-2 px-3 text-xs text-foreground">{(d.expected as string) || "—"}</td>
-                  <td className="py-2 px-3 text-xs text-muted-foreground max-w-xs">{d.reasoning as string}</td>
+                  <td className="py-2 px-3 text-xs text-muted-foreground max-w-xs">{d.reasoning != null ? String(d.reasoning) : ""}</td>
                 </tr>
               ))
             ) : (

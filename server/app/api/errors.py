@@ -23,7 +23,7 @@ async def app_error_handler(request: Request, exc: AppError) -> JSONResponse:
     )
     return JSONResponse(
         status_code=exc.http_status,
-        content={"code": exc.code, "message": exc.message, "details": exc.details},
+        content={"data": None, "message": exc.message, "statusCode": exc.http_status},
     )
 
 
@@ -34,5 +34,5 @@ async def unhandled_error_handler(request: Request, exc: Exception) -> JSONRespo
     )
     return JSONResponse(
         status_code=500,
-        content={"code": "internal_error", "message": "Internal server error", "details": {}},
+        content={"data": None, "message": "Internal server error", "statusCode": 500},
     )

@@ -74,7 +74,7 @@ async def run_validator(
         model=settings.OPENAI_MODEL_REASONING,
         system=SYSTEM,
         user_content=user,
-        tool_name=_TOOL_NAME,
+        tool_name=_TOOL_NAME, 
         tool_description=_TOOL_DESCRIPTION,
         tool_parameters=_TOOL_PARAMETERS,
         temperature=0.0,

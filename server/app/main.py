@@ -12,7 +12,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
-from app.api import auth, documents, health, rule_books
+from app.api import auth, documents, health, jobs, rule_books
 from app.api.errors import app_error_handler, unhandled_error_handler
 from app.api.files import router as files_router
 from app.core.config import get_settings
@@ -79,6 +79,7 @@ def create_app() -> FastAPI:
     app.include_router(health.router)
     app.include_router(auth.router)
     app.include_router(documents.router)
+    app.include_router(jobs.router)
     app.include_router(rule_books.router)
     app.include_router(files_router)
     return app

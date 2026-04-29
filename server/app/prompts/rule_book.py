@@ -45,23 +45,8 @@ with care:
   canonical value — the document extractor will emit them verbatim on semantic
   matches, so stripping them here causes real document values to get wrongly
   flagged as mismatches later.
-- DO NOT strip a trailing period, comma, or parenthesized code that the rule
-  book uses — they are intentional (e.g. "WAL-MART STORES INC." keeps the
-  period; "Mumbai (INBOM)" keeps the parenthesized port code).
 - DO NOT invent suffixes, port codes, country names, or abbreviations that
   are not present in the rule book.
-
-Examples:
-  - Rule book line: `Consignee must be "WAL-MART STORES INC."`
-      → `equals.value = "WAL-MART STORES INC."`   (period kept, trimmed)
-  - Rule book line: `Allowed loading ports: Mumbai (INBOM), Nhava Sheva (INNSA)`
-      → `one_of.values = ["Mumbai (INBOM)", "Nhava Sheva (INNSA)"]`
-        (single space before paren, codes kept as written)
-  - Rule book line: `Incoterms: FOB Mumbai or FOB Nhava Sheva`
-      → `one_of.values = ["FOB Mumbai", "FOB Nhava Sheva"]`
-  - Rule book line: `Port of discharge: Los Angeles, USA (USLAX)`
-      → `equals.value = "Los Angeles, USA (USLAX)"`
-        (comma, country, and code all preserved verbatim)
 
 Submit the rules by calling the `submit_rule_book` tool."""
 

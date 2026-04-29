@@ -1,4 +1,9 @@
-"""Document upload, list, detail, SSE timeline."""
+"""Document detail and SSE timeline.
+
+Note: multi-file upload now lives at POST /v1/documents (this module). Each
+upload creates a Job that bundles the documents; pipelines do not start
+until the user calls POST /v1/jobs/{job_id}/start.
+"""
 
 from __future__ import annotations
 
@@ -7,80 +12,73 @@ import json
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, File, UploadFile
-from fastapi.responses import StreamingResponse
+from fastapi.responses import JSONResponse, StreamingResponse
 
 from app.api.deps import (
     get_bus_svc,
     get_document_repo,
-    get_document_svc,
+    get_job_svc,
     get_tenant_context,
 )
 from app.core.config import get_settings
 from app.core.errors import NotFoundError, ValidationError
 from app.repositories.documents import DocumentRepository
-from app.schemas.api import DocumentUploadResponse, TenantContext
+from app.schemas.api import TenantContext
 from app.schemas.common import DocumentStatus
-from app.schemas.pipeline import DocumentDetail, DocumentListItem
-from app.services.documents import DocumentService
+from app.schemas.pipeline import DocumentDetail
 from app.services.events import SessionBus, encode_sse
+from app.services.jobs import JobService, UploadFile as JobUploadFile
 
-router = APIRouter(prefix="/api/documents", tags=["documents"])
+router = APIRouter(prefix="/v1/documents", tags=["documents"])
 
 
-@router.post("/upload", response_model=DocumentUploadResponse)
-async def upload(
-    file: UploadFile = File(...),
+@router.post("")
+async def upload_documents(
+    files: list[UploadFile] = File(...),
     ctx: TenantContext = Depends(get_tenant_context),
-    svc: DocumentService = Depends(get_document_svc),
+    svc: JobService = Depends(get_job_svc),
 ):
+    """Upload one or more files. Creates a single Job that groups them all.
+
+    Pipelines do NOT start here — the client must call POST /v1/jobs/{id}/start
+    once the user is done adding files.
+    """
     settings = get_settings()
-    data = await file.read()
-    if len(data) > settings.MAX_UPLOAD_BYTES:
-        raise ValidationError(f"file exceeds max size {settings.MAX_UPLOAD_BYTES} bytes")
+    if not files:
+        raise ValidationError("at least one file is required")
 
-    res = await svc.upload_and_start_pipeline(
-        tenant_id=ctx.tenant_id,
-        filename=file.filename or "document.pdf",
-        content_type=file.content_type or "application/pdf",
-        data=data,
-    )
-    return DocumentUploadResponse(
-        document_id=res["document_id"],
-        session_id=res["session_id"],
-        status=res["status"],
-    )
-
-
-@router.get("", response_model=list[DocumentListItem])
-async def list_documents(
-    ctx: TenantContext = Depends(get_tenant_context),
-    repo: DocumentRepository = Depends(get_document_repo),
-):
-    rows = await repo.list_documents(tenant_id=ctx.tenant_id)
-    items: list[DocumentListItem] = []
-    for r in rows:
-        outcome = None
-        if r["type"] == "document":
-            dec = await repo.get_latest_decision(
-                tenant_id=ctx.tenant_id, document_id=r["id"],
+    payload: list[JobUploadFile] = []
+    for f in files:
+        data = await f.read()
+        if len(data) > settings.MAX_UPLOAD_BYTES:
+            raise ValidationError(
+                f"file '{f.filename}' exceeds max size {settings.MAX_UPLOAD_BYTES} bytes"
             )
-            if dec is not None:
-                to = _json_loads(dec["tool_output"])
-                outcome = to.get("outcome")
-        items.append(DocumentListItem(
-            id=r["id"],
-            original_name=r["original_name"],
-            type=r["type"],
-            doc_type=r["doc_type"],
-            status=DocumentStatus(r["status"]),
-            outcome=outcome,
-            is_active=r["is_active"],
-            created_at=r["created_at"],
+        payload.append(JobUploadFile(
+            filename=f.filename or "document.pdf",
+            content_type=f.content_type or "application/pdf",
+            data=data,
         ))
-    return items
+
+    res = await svc.create_job_with_documents(tenant_id=ctx.tenant_id, files=payload)
+    return JSONResponse(
+        status_code=200,
+        content={
+            "data": {
+                "job_id": str(res["job_id"]),
+                "rule_book_id": str(res["rule_book_id"]),
+                "status": res["status"],
+                "documents": [
+                    {**d, "document_id": str(d["document_id"])} for d in res["documents"]
+                ],
+            },
+            "message": "Documents uploaded successfully",
+            "statusCode": 200,
+        },
+    )
 
 
-@router.get("/{document_id}", response_model=DocumentDetail)
+@router.get("/{document_id}")
 async def get_document(
     document_id: UUID,
     ctx: TenantContext = Depends(get_tenant_context),
@@ -105,9 +103,10 @@ async def get_document(
             tenant_id=ctx.tenant_id, session_id=doc["session_id"],
         )
 
-    return DocumentDetail(
+    detail = DocumentDetail(
         id=doc["id"],
         tenant_id=doc["tenant_id"],
+        job_id=doc["job_id"],
         session_id=doc["session_id"],
         type=doc["type"],
         original_name=doc["original_name"],
@@ -117,13 +116,17 @@ async def get_document(
         status=DocumentStatus(doc["status"]),
         is_active=doc["is_active"],
         created_at=doc["created_at"],
-        file_url=f"/api/files/{doc['storage_key']}" if doc.get("storage_key") else None,
+        file_url=f"/v1/files/{doc['id']}" if doc.get("storage_key") else None,
         extraction=_json_loads(extraction_row["tool_output"]) if extraction_row else None,
         validation=_json_loads(validation_row["tool_output"]) if validation_row else None,
         decision=_json_loads(decision_row["tool_output"]) if decision_row else None,
         pipeline_status=session["pipeline_status"] if session else None,
         total_tokens_in=session["total_tokens_in"] if session else 0,
         total_tokens_out=session["total_tokens_out"] if session else 0,
+    )
+    return JSONResponse(
+        status_code=200,
+        content={"data": detail.model_dump(mode="json"), "message": "Document fetched successfully", "statusCode": 200},
     )
 
 

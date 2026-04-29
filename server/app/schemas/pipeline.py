@@ -34,6 +34,7 @@ class DocumentDetail(BaseModel):
 
     id: UUID
     tenant_id: UUID
+    job_id: UUID | None = None
     session_id: UUID | None
     type: Literal["document", "rule_book"]
     original_name: str
@@ -52,14 +53,3 @@ class DocumentDetail(BaseModel):
     total_tokens_out: int = 0
 
 
-class DocumentListItem(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-    id: UUID
-    original_name: str
-    type: Literal["document", "rule_book"]
-    doc_type: str | None
-    status: DocumentStatus
-    outcome: str | None = None
-    is_active: bool = False
-    created_at: datetime

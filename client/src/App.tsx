@@ -2,7 +2,8 @@ import { Navigate, Route, Routes } from "react-router-dom";
 import { AuthProvider, useAuth } from "./contexts/AuthContext";
 import { AppShell } from "./components/AppShell";
 import { SignInPage } from "./pages/SignInPage";
-import { DocumentsListPage } from "./pages/DocumentsListPage";
+import { JobsListPage } from "./pages/JobsListPage";
+import { JobDetailPage } from "./pages/JobDetailPage";
 import { DocumentDetailPage } from "./pages/DocumentDetailPage";
 import { UploadPage } from "./pages/UploadPage";
 import { RuleBooksPage } from "./pages/RuleBooksPage";
@@ -32,8 +33,9 @@ export default function App() {
             </RequireAuth>
           }
         >
-          <Route index element={<DocumentsListPage />} />
+          <Route index element={<JobsListPage />} />
           <Route path="upload" element={<UploadPage />} />
+          <Route path="jobs/:id" element={<JobDetailPage />} />
           <Route path="documents/:id" element={<DocumentDetailPage />} />
           <Route path="admin/rule-books" element={<RuleBooksPage />} />
         </Route>

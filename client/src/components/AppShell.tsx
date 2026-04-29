@@ -1,10 +1,10 @@
 import { Link, NavLink, Outlet } from "react-router-dom";
-import { FileText, Home, LogOut, ShieldCheck, Upload, User } from "lucide-react";
+import { FileText, Layers, LogOut, ShieldCheck, Upload, User } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useAuth } from "@/contexts/AuthContext";
 
 const nav = [
-  { to: "/", label: "Documents", icon: Home, end: true },
+  { to: "/", label: "Jobs", icon: Layers, end: true },
   { to: "/upload", label: "Upload", icon: Upload },
   { to: "/admin/rule-books", label: "Rule books", icon: ShieldCheck },
 ];

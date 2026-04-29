@@ -52,14 +52,6 @@ class SessionInfo(BaseModel):
 
 
 
-class DocumentUploadResponse(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-    document_id: UUID
-    session_id: UUID
-    status: str
-
-
 class RuleBookUploadResponse(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -96,7 +88,7 @@ class StoredDocumentMeta(BaseModel):
 
 
 class RuleBookBundle(BaseModel):
-    """Returned by GET /api/rule-books/:customer — file meta + extracted rules."""
+    """File meta + extracted rules. List endpoints omit extracted_rules."""
 
     model_config = ConfigDict(extra="forbid")
 

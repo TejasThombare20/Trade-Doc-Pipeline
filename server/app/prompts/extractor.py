@@ -44,26 +44,8 @@ to the same entity, place, or code, and the only differences are formatting
 NOT semantic-match across genuinely different entities, ports, or codes.
 
 Example — port_of_loading. Rule allows: "Mumbai (INBOM)" or "Nhava Sheva (INNSA)".
-  - Document shows `MUMBAI`           → emit `Mumbai (INBOM)`
-  - Document shows `mumbai`           → emit `Mumbai (INBOM)`
-  - Document shows `Mumbai, India`    → emit `Mumbai (INBOM)`
   - Document shows `Mumbai, INBOM`    → emit `Mumbai (INBOM)` (do NOT invent
                                         your own format like "Mumbai , INBOM")
-  - Document shows `Nhava Sheva Port` → emit `Nhava Sheva (INNSA)`
-  - Document shows `Chennai`          → emit `Chennai` (no semantic match in
-                                        the allowed list; let validator flag it)
-
-Example — consignee_name. Rule requires equals `"WAL-MART STORES INC."` (with
-trailing period).
-  - Document shows `WAL-MART STORES INC`  → emit `WAL-MART STORES INC.`
-                                            (punctuation difference only)
-  - Document shows `wal-mart stores inc.` → emit `WAL-MART STORES INC.`
-  - Document shows `Walmart Inc.`         → emit `WAL-MART STORES INC.` if
-                                            clearly the same entity, else emit
-                                            verbatim
-  - Document shows `TARGET CORPORATION`   → emit `TARGET CORPORATION` (different
-                                            entity; no semantic match)
-
 Example — incoterms. Rule allows: "FOB Mumbai" or "FOB Nhava Sheva".
   - Document shows `FOB MUMBAI`  → emit `FOB Mumbai`
   - Document shows `CIF Los Angeles` → emit `CIF Los Angeles` (no semantic

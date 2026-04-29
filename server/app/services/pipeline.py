@@ -144,8 +144,15 @@ class PipelineService:
         storage_key: str,
         mime_type: str,
         original_name: str,
+        rule_book_id: UUID | None = None,
     ) -> None:
-        """Parse -> extract -> validate -> decide, logging each step."""
+        """Parse -> extract -> validate -> decide, logging each step.
+
+        If `rule_book_id` is provided, the pipeline uses that rule book's
+        extracted_rules verbatim. Otherwise it falls back to the tenant's
+        currently active rule book. Jobs always pass an explicit id so the
+        snapshot taken at job creation cannot drift.
+        """
         set_correlation_id(f"sess-{session_id.hex[:12]}")
         ctx = StepContext(
             tenant_id=tenant_id,
@@ -158,13 +165,21 @@ class PipelineService:
         tokens_in = 0
         tokens_out = 0
 
-        # Preflight: tenant must have an active rule book.
+        # Resolve rule book: explicit (job snapshot) or tenant-active fallback.
+        # Rules are read from extractions.tool_output, not documents.extracted_rules.
         async with self._pool.acquire() as conn:
             repo = DocumentRepository(conn)
-            active_rb = await repo.get_active_rule_book(tenant_id=tenant_id)
-        if active_rb is None:
-            await self._complete_session(ctx, "fail", 0, 0, "no_active_rule_book")
-            raise RuleBookMissingError("Tenant has no active rule book.")
+            if rule_book_id is not None:
+                rb_doc = await repo.get_document(tenant_id=tenant_id, document_id=rule_book_id)
+                active_rb = rb_doc if rb_doc and rb_doc["type"] == "rule_book" else None
+            else:
+                active_rb = await repo.get_active_rule_book(tenant_id=tenant_id)
+            if active_rb is None:
+                await self._complete_session(ctx, "fail", 0, 0, "no_active_rule_book")
+                raise RuleBookMissingError("Tenant has no active rule book.")
+            rb_rules_raw = await repo.get_rule_book_rules(
+                tenant_id=tenant_id, document_id=active_rb["id"],
+            )
 
         # -------- step 1: parsing (manual) --------
         run_id = await self._start_step(ctx, "parsing", "manual")
@@ -198,7 +213,7 @@ class PipelineService:
                 tenant_id=tenant_id, document_id=document_id, status="extracting",
             )
 
-        rules = _rules_from_extracted(active_rb["extracted_rules"])
+        rules = _rules_from_extracted(rb_rules_raw)
 
         # -------- step 2: extraction (llm) --------
         run_id = await self._start_step(ctx, "extraction", "llm")
@@ -380,16 +395,12 @@ class PipelineService:
             rb_res.usage.tokens_in, rb_res.usage.tokens_out, "extraction",
         )
 
-        rules_as_dicts = [r.model_dump(mode="json") for r in rb_res.output.rules]
         async with self._pool.acquire() as conn:
             repo = DocumentRepository(conn)
             await repo.insert_extraction(
                 tenant_id=tenant_id, document_id=document_id,
                 session_id=session_id, pipeline_run_id=run_id,
                 tool_content=rb_res.tool_content, tool_output=rb_res.tool_output,
-            )
-            await repo.set_extracted_rules(
-                tenant_id=tenant_id, document_id=document_id, rules=rules_as_dicts,
             )
             await repo.update_document_status(
                 tenant_id=tenant_id, document_id=document_id, status="completed",
@@ -435,6 +446,7 @@ async def run_document_pipeline(
     storage_key: str,
     mime_type: str,
     original_name: str,
+    rule_book_id: UUID | None = None,
 ) -> None:
     await get_pipeline_service().run_document_pipeline(
         tenant_id=tenant_id,
@@ -443,6 +455,7 @@ async def run_document_pipeline(
         storage_key=storage_key,
         mime_type=mime_type,
         original_name=original_name,
+        rule_book_id=rule_book_id,
     )
 
 
